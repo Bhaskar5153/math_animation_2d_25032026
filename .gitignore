@@ -205,3 +205,12 @@ cython_debug/
 marimo/_static/
 marimo/_lsp/
 __marimo__/
+
+# MathViz outputs (generated files — large media)
+outputs/solutions/*.md
+outputs/animations/*.py
+outputs/animations/media/
+
+# Keep folder structure in git
+!outputs/solutions/.gitkeep
+!outputs/animations/.gitkeep
