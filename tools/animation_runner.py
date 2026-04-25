@@ -1,10 +1,12 @@
 """
 Animation runner tool — saves Manim code and executes it to produce a video.
 """
+import asyncio
 import os
 import re
 import subprocess
 import sys
+import time
 from datetime import datetime
 from pathlib import Path
 
@@ -82,16 +84,125 @@ def _latex_to_unicode(s: str) -> str:
     return s.strip()
 
 
+# All MathTex-only method names that crash when called on a Text object
+_MATHTEX_METHODS = (
+    "get_part_by_tex",
+    "get_parts_by_tex",
+    "get_part_by_substring",
+    "get_part_by_text",
+    "set_color_by_tex",
+    "set_color_by_tex_to_color_map",
+    "set_submobject_colors_by_tex",
+    "get_tex_string",
+)
+
+# Methods that look plausible but don't exist on Mobject
+_FAKE_MOBJECT_METHODS = (
+    "get_part_by_type",
+    "get_parts_by_type",
+    # below are LLM-invented methods that do not exist in Manim
+    "get_part_by_custom_attribute",
+    "get_custom_attribute",
+    "set_custom_attribute",
+    "undo",
+)
+
+
+def _fix_raw_newlines_in_strings(code: str) -> str:
+    """
+    Scan code character-by-character and replace any literal newline that
+    appears *inside* a single- or double-quoted string literal with the
+    two-character escape sequence \\n.
+
+    Triple-quoted strings are passed through unchanged (they legitimately
+    span multiple lines).  Comment lines and escaped characters are also
+    handled correctly.
+
+    This guards against LLMs that emit:
+        Text("Line 1
+        Line 2")
+    instead of the valid:
+        Text("Line 1\\nLine 2")
+    """
+    result: list[str] = []
+    i = 0
+    n = len(code)
+    in_string = False
+    quote_char: str | None = None
+
+    while i < n:
+        ch = code[i]
+
+        if not in_string:
+            if ch == "#":
+                # Comment — copy to end-of-line, cannot contain string markers
+                eol = code.find("\n", i)
+                if eol == -1:
+                    result.append(code[i:])
+                    break
+                result.append(code[i : eol + 1])
+                i = eol + 1
+                continue
+            elif ch in ('"', "'"):
+                # Check for triple quote
+                tq = code[i : i + 3]
+                if tq in ('"""', "'''"):
+                    # Find the closing triple quote and pass through verbatim
+                    close = code.find(tq, i + 3)
+                    if close == -1:
+                        result.append(code[i:])
+                        break
+                    result.append(code[i : close + 3])
+                    i = close + 3
+                    continue
+                else:
+                    in_string = True
+                    quote_char = ch
+                    result.append(ch)
+                    i += 1
+                    continue
+            result.append(ch)
+            i += 1
+        else:
+            # Inside a single- or double-quoted string
+            if ch == "\\":
+                # Escaped character — copy both chars as-is
+                result.append(ch)
+                if i + 1 < n:
+                    result.append(code[i + 1])
+                    i += 2
+                else:
+                    i += 1
+            elif ch == "\n":
+                # Raw newline inside a string literal → replace with \n escape
+                result.append("\\n")
+                i += 1
+            elif ch == quote_char:
+                # Closing quote
+                in_string = False
+                quote_char = None
+                result.append(ch)
+                i += 1
+            else:
+                result.append(ch)
+                i += 1
+
+    return "".join(result)
+
+
 def _sanitize_no_latex(code: str) -> str:
     """
     Safety net: replace MathTex/Tex class names with Text and remove
-    kwargs that only exist on MathTex.  Does NOT touch string contents
-    (to avoid accidentally corrupting code or comments).
+    kwargs / methods that only exist on MathTex.  Does NOT touch string
+    contents (to avoid accidentally corrupting code or comments).
 
     The primary defence is the animation prompt instructing the LLM to
     use Text + Unicode symbols from the start.  This function is a
     last-resort guard for stray MathTex uses.
     """
+    # 0. Fix literal newlines inside single/double-quoted string literals
+    code = _fix_raw_newlines_in_strings(code)
+
     # 1. Replace MathTex( → Text( (full word match)
     code = re.sub(r"\bMathTex\s*\(", "Text(", code)
 
@@ -103,16 +214,387 @@ def _sanitize_no_latex(code: str) -> str:
                   "arg_separator"):
         code = re.sub(r",?\s*" + kwarg + r"\s*=\s*(?:[^,)\n]+)", "", code)
 
-    # 4. Remove MathTex-only methods chained onto any expression
-    code = re.sub(r"\.get_part_by_(?:tex|substring)\([^)]*\)", "", code)
+    # 4a. Remove entire assignment lines whose RHS uses a forbidden method.
+    method_alt = "|".join(re.escape(m) for m in (*_MATHTEX_METHODS, *_FAKE_MOBJECT_METHODS))
+    code = re.sub(
+        r"^[ \t]*\w+\s*=\s*[^\n]+\.(?:" + method_alt + r")\([^)]*\)(?:\[\d+\])?[^\n]*\n",
+        "",
+        code,
+        flags=re.MULTILINE,
+    )
+
+    # 4b. Remove remaining chained MathTex-only method calls (not assignments)
+    for m in _MATHTEX_METHODS:
+        code = re.sub(r"\." + re.escape(m) + r"\([^)]*\)(?:\[\d+\])?", "", code)
+
+    # 4c. Replace fake Mobject methods with .get_center() so chained calls survive
+    #     e.g.  obj.get_part_by_type(Circle).get_center()  → obj.get_center().get_center()
+    for m in _FAKE_MOBJECT_METHODS:
+        code = re.sub(r"\." + re.escape(m) + r"\([^)]*\)(?:\[\d+\])?", ".get_center()", code)
 
     # 5. Replace VGroup(*self.mobjects) → Group(*self.mobjects)
     #    VGroup only accepts VMobject; self.mobjects may contain plain Mobjects
     code = re.sub(r"\bVGroup\(\s*\*\s*self\.mobjects\s*\)", "Group(*self.mobjects)", code)
 
+    # 5b. Replace Rectangle(... corner_radius=...) → RoundedRectangle(... corner_radius=...)
+    #     Rectangle.__init__ does NOT accept corner_radius in Manim 0.18+;
+    #     RoundedRectangle does. Only apply when corner_radius kwarg is present.
+    #     \bRectangle\b won't match RoundedRectangle or SurroundingRectangle (no word boundary before R).
+    code = re.sub(
+        r"\bRectangle(\s*\([^)]*corner_radius\s*=)",
+        "RoundedRectangle\\1",
+        code,
+    )
+
+    # 6. Replace bare `bounce` rate_func (not a Manim built-in) → ease_out_bounce
+    code = re.sub(r"\brate_func\s*=\s*bounce\b", "rate_func=ease_out_bounce", code)
+
+    # 7. Ensure ease_out_bounce import exists if used
+    if "ease_out_bounce" in code and "from manim.utils.rate_functions import" not in code:
+        code = "from manim.utils.rate_functions import ease_out_bounce\n" + code
+
+    # 8. Remove include_numbers=True from NumberLine/Axes — uses MathTex internally
+    code = re.sub(r",?\s*include_numbers\s*=\s*True", "", code)
+
+    # 9. Remove .add_coordinates(...) calls — Axes.add_coordinates() uses MathTex
+    code = re.sub(r"\.\s*add_coordinates\s*\([^)]*\)", "", code)
+
+    # 10. Remove x_axis_config / y_axis_config include_numbers dict entries
+    code = re.sub(r",?\s*\"include_numbers\"\s*:\s*True", "", code)
+    code = re.sub(r",?\s*'include_numbers'\s*:\s*True", "", code)
+
+    # 11. Replace RIGHT/LEFT/UP/DOWN.copy().rotate(angle) → np.array([cos,sin,0])
+    #     Direction constants are numpy arrays — they have no .rotate() method.
+    def _dir_rotate_repl(m):
+        angle_expr = m.group(1)
+        return f"np.array([np.cos({angle_expr}), np.sin({angle_expr}), 0])"
+    code = re.sub(
+        r"(?:RIGHT|LEFT|UP|DOWN)\.copy\(\)\.rotate\(([^)]+)\)",
+        _dir_rotate_repl,
+        code,
+    )
+
+    # 12. Replace non-existent rate functions with valid Manim equivalents
+    #     LLMs commonly invent names like shake, wobble, elastic, spring.
+    _fake_rate_funcs = {
+        "shake":       "there_and_back",
+        "wobble":      "there_and_back",
+        "elastic":     "ease_out_bounce",
+        "spring":      "ease_out_bounce",
+        "overshoot":   "ease_out_bounce",
+        "rubber_band": "there_and_back",
+    }
+    for fake, real in _fake_rate_funcs.items():
+        code = re.sub(r"\brate_func\s*=\s*" + fake + r"\b", f"rate_func={real}", code)
+
+    # 13. Remove lines that call invented custom-attribute helpers the LLM makes up.
+    #     e.g. pancho.get_part_by_custom_attribute("head")
+    #          obj.get_custom_attribute("arms")
+    #     Replace with .submobjects[0] so chained calls don't crash on NoneType.
+    code = re.sub(
+        r"\.get_part_by_custom_attribute\s*\([^)]*\)",
+        ".submobjects[0]",
+        code,
+    )
+    code = re.sub(
+        r"\.get_custom_attribute\s*\([^)]*\)",
+        ".submobjects[0]",
+        code,
+    )
+
+    # 14. Remove Mobject.set(...) calls that try to assign custom Python attributes.
+    #     e.g.  person.set(head=head, arms=arms)  — Mobject.set() only accepts
+    #     valid Manim style kwargs, not arbitrary Python attributes.
+    #     Safe to remove the whole statement; it was only used to store refs.
+    code = re.sub(
+        r"^[ \t]*\w+\.set\s*\([^)]*\)\s*\n",
+        "",
+        code,
+        flags=re.MULTILINE,
+    )
+
+    # 15. Remove .animate.undo() — no such animation exists in Manim.
+    code = re.sub(r"\.animate\.undo\s*\(\s*\)", "", code)
+
+    # 16. Replace SVGMobject("anything") with a safe fallback Circle.
+    #     LLMs sometimes request SVG assets that don't exist on disk.
+    code = re.sub(
+        r'\bSVGMobject\s*\(\s*["\'][^"\']*["\']\s*\)',
+        "Circle(radius=0.3, color=WHITE, fill_color=WHITE, fill_opacity=1)",
+        code,
+    )
+
+    # 17. If self.camera.frame is used, Scene must be MovingCameraScene.
+    #     Silently upgrade the base class so the code runs.
+    if "self.camera.frame" in code:
+        code = re.sub(
+            r"\bclass\s+MathAnimationScene\s*\(\s*Scene\s*\)",
+            "class MathAnimationScene(MovingCameraScene)",
+            code,
+        )
+
+    # 18. Fix invalid / non-existent Manim color names LLMs commonly invent.
+    _bad_colors = {
+        r"\bDARK_BLUE\b":   "BLUE_E",
+        r"\bDARK_GREEN\b":  "GREEN_E",
+        r"\bDARK_RED\b":    "MAROON_A",
+        r"\bLIGHT_GRAY\b":  "GRAY_A",
+        r"\bLIGHT_GREY\b":  "GRAY_A",
+        r"\bDARK_GRAY\b":   "GRAY_D",
+        r"\bDARK_GREY\b":   "GRAY_D",
+        r"\bMAROON_E\b":    "MAROON",
+        r"\bBROWN\b":       "GOLD_D",
+        r"\bINDIGO\b":      "PURPLE",
+        r"\bCYAN\b":        "TEAL_A",
+    }
+    for bad_pat, good in _bad_colors.items():
+        code = re.sub(bad_pat, good, code)
+
+    # 19. Remove .set_anim_args(...) — not valid on an AnimationBuilder (.animate).
+    #     The rate_func / run_time should be passed directly to self.play().
+    code = re.sub(r"\.set_anim_args\s*\([^)]*\)", "", code)
+
+    # 20. Fix numpy-array direction constants used as boolean (causes ValueError).
+    #     e.g.  if side == UL:  →  if True:  (since LLMs pass UL/DR as string args now,
+    #     this most commonly happens in user-defined make_bubble helper code).
+    #     Replace function default  side=UL  with  side="left"  and
+    #                              side=DR / side=UR  with  side="right"
+    #     so the function signature is safe even if the LLM keeps using it.
+    code = re.sub(r"\bdef\s+make_bubble\s*\(([^)]*)\bside\s*=\s*UL\b([^)]*)\)",
+                  lambda m: f"def make_bubble({m.group(1)}side='left'{m.group(2)})", code)
+    code = re.sub(r"\bdef\s+make_bubble\s*\(([^)]*)\bside\s*=\s*(?:DR|UR|DL)\b([^)]*)\)",
+                  lambda m: f"def make_bubble({m.group(1)}side='right'{m.group(2)})", code)
+    # Fix callers: side=UL/DL → side="left", side=DR/UR → side="right"
+    code = re.sub(r"\bside\s*=\s*(?:UL|DL)\b", 'side="left"', code)
+    code = re.sub(r"\bside\s*=\s*(?:DR|UR)\b", 'side="right"', code)
+    # Fix the conditional inside make_bubble bodies that compare a numpy array
+    code = re.sub(r'\bif\s+side\s*(?:is|==)\s*UL\b', 'if side == "left"', code)
+    code = re.sub(r'\belse\s+side\s*(?:is|==)\s*DR\b', 'else', code)
+
+    # 21. Fix removed/renamed Manim CE fade animations.
+    #     Manim 0.18+ dropped directional FadeIn/FadeOut variants.
+    _fade_renames = {
+        r"\bFadeOutToDown\b":   "FadeOut",
+        r"\bFadeOutToUp\b":     "FadeOut",
+        r"\bFadeInFromDown\b":  "FadeIn",
+        r"\bFadeInFromUp\b":    "FadeIn",
+        r"\bFadeInFromLeft\b":  "FadeIn",
+        r"\bFadeInFromRight\b": "FadeIn",
+        r"\bShowCreation\b":    "Create",   # old Manim 2.x name
+        r"\bUncreate\b":        "Uncreate", # keep — still valid
+        r"\bGrowArrow\b":       "Create",   # removed in newer versions
+        r"\bShowPassingFlash\b": "ShowPassingFlash",  # still valid
+        r"\bCircleIndicate\b":  "Indicate", # not in CE
+        r"\bFocusOn\b":         "Indicate", # not in CE
+    }
+    for bad_pat, good in _fade_renames.items():
+        code = re.sub(bad_pat, good, code)
+
+    # 22. Fix VGroup([a, b, c]) — LLMs often pass a list instead of unpacked args.
+    #     VGroup expects *args, not a list.
+    code = re.sub(
+        r"\bVGroup\(\s*\[([^\]]+)\]\s*\)",
+        lambda m: f"VGroup({m.group(1)})",
+        code,
+    )
+
+    # 23. Fix Group([a, b, c]) — same issue as VGroup.
+    code = re.sub(
+        r"\bGroup\(\s*\[([^\]]+)\]\s*\)",
+        lambda m: f"Group({m.group(1)})",
+        code,
+    )
+
+    # 24. Fix Arrow(start=..., end=...) using keyword-only syntax.
+    #     Manim Arrow accepts positional: Arrow(start, end) but keywords work too.
+    #     However LLMs sometimes pass direction=(X) for tip direction — remove it.
+    code = re.sub(r",?\s*direction\s*=\s*(?:UP|DOWN|LEFT|RIGHT|UL|UR|DL|DR)\b", "", code)
+
+    # 25. Fix .get_center() called without parentheses (LLMs sometimes drop them).
+    #     e.g.  obj.get_center  →  obj.get_center()
+    #     Only fix when the bare attribute is immediately used as a value
+    #     (followed by , ) ] or whitespace/newline).
+    code = re.sub(r"\.get_center(?!\s*\()", ".get_center()", code)
+    code = re.sub(r"\.get_top(?!\s*\()", ".get_top()", code)
+    code = re.sub(r"\.get_bottom(?!\s*\()", ".get_bottom()", code)
+    code = re.sub(r"\.get_left(?!\s*\()", ".get_left()", code)
+    code = re.sub(r"\.get_right(?!\s*\()", ".get_right()", code)
+
+    # 26. Fix Polygon with fewer than 3 vertices (crashes on creation).
+    #     Replace degenerate Polygon(A, B) with Line(A, B).
+    def _fix_polygon(m: re.Match) -> str:
+        args_str = m.group(1).strip()
+        # Count top-level comma-separated args (simplified — no nested parens)
+        depth = 0
+        count = 1
+        for ch in args_str:
+            if ch in "([{":
+                depth += 1
+            elif ch in ")]}":
+                depth -= 1
+            elif ch == "," and depth == 0:
+                count += 1
+        if count < 3:
+            return f"Line({args_str})"
+        return m.group(0)  # leave intact
+
+    code = re.sub(r"\bPolygon\s*\(([^)]+)\)", _fix_polygon, code)
+
+    # 27. Fix self.play() called with None or empty args — crashes Manim.
+    #     Remove any play() call where all arguments are just None or empty.
+    code = re.sub(r"\bself\.play\(\s*None\s*\)", "self.wait(0.1)", code)
+    code = re.sub(r"\bself\.play\(\s*\)", "self.wait(0.1)", code)
+
+    # 28. Fix ImageMobject("path") — image files won't exist in production.
+    #     Replace with a colored Rectangle of similar proportions.
+    code = re.sub(
+        r'\bImageMobject\s*\(\s*["\'][^"\']*["\']\s*\)',
+        "Rectangle(width=2, height=1.5, color=BLUE_C, fill_color=BLUE_E, fill_opacity=0.8)",
+        code,
+    )
+
     return code
 
 
+# ---------------------------------------------------------------------------
+# Guaranteed fallback animation generator
+# ---------------------------------------------------------------------------
+
+def _generate_fallback_code(problem_slug: str, question: str, solution_text: str) -> str:
+    """
+    Generate a minimal, guaranteed-to-render text-based Manim animation.
+    Used automatically when the LLM's creative script fails to render.
+    Displays the question and every solution step as animated on-screen text,
+    finishing with the final answer boxed in gold.
+    Uses ONLY the most basic Manim primitives — nothing that can crash.
+    """
+    def _safe(s: str, maxlen: int = 72) -> str:
+        """Escape text for safe embedding inside a Python double-quoted string."""
+        s = s.replace("\\", "\\\\").replace('"', '\\"').replace("\n", " ").strip()
+        s = re.sub(r"[\x00-\x1f\x7f-\x9f]", " ", s)   # strip control chars
+        return s[:maxlen]
+
+    q_safe = _safe(question, 80) or "Math Problem"
+
+    # Split solution into non-empty lines, cap at 24 to avoid overflow
+    raw_lines = [ln.strip() for ln in solution_text.splitlines() if ln.strip()][:24]
+    step_lines = [_safe(ln, 72) for ln in raw_lines] or ["Solution not available."]
+    answer_line = step_lines[-1]   # last line is treated as the final answer
+
+    # Group steps into pages of 5 lines so they fit vertically on screen
+    PAGE = 5
+    pages = [step_lines[i : i + PAGE] for i in range(0, len(step_lines), PAGE)]
+    COLORS = ["BLUE_A", "TEAL_A", "GREEN_A", "YELLOW_A", "ORANGE"]
+
+    page_blocks: list[str] = []
+    for pg_num, pg_lines in enumerate(pages):
+        blk: list[str] = []
+        if pg_num > 0:
+            blk.append(f"\n        self.wait(0.8)")
+            blk.append(f"        self.play(FadeOut(step_grp_{pg_num - 1}), run_time=0.4)")
+        y = 1.4
+        for i, ln in enumerate(pg_lines):
+            col = COLORS[i % len(COLORS)]
+            vname = f"s{pg_num}_{i}"
+            blk.append(f'\n        {vname} = Text("{ln}", font_size=22, color={col})')
+            blk.append(f"        {vname}.move_to(np.array([0, {y:.2f}, 0]))")
+            blk.append(f"        self.play(FadeIn({vname}, shift=RIGHT * 0.2), run_time=0.4)")
+            y -= 0.62
+        grp_vars = ", ".join(f"s{pg_num}_{i}" for i in range(len(pg_lines)))
+        blk.append(f"        step_grp_{pg_num} = VGroup({grp_vars})")
+        page_blocks.append("\n".join(blk))
+
+    last_pg = len(pages) - 1
+    fade_last = f"\n        self.wait(0.5)\n        self.play(FadeOut(step_grp_{last_pg}), run_time=0.4)"
+    steps_code = "\n".join(page_blocks) + fade_last
+
+    return f"""\
+from manim import *
+import numpy as np
+
+class MathAnimationScene(Scene):
+    def construct(self):
+        bg = Rectangle(width=16, height=9, fill_color=BLACK, fill_opacity=1, stroke_width=0)
+        self.add(bg)
+
+        title = Text("Math Solution", font_size=42)
+        title.set_color_by_gradient(YELLOW, ORANGE)
+        title.to_edge(UP, buff=0.28)
+        self.play(Write(title), run_time=1.0)
+
+        q_label = Text("{q_safe}", font_size=24)
+        q_label.set_color(BLUE_A)
+        q_label.next_to(title, DOWN, buff=0.3)
+        self.play(FadeIn(q_label, shift=UP * 0.2), run_time=0.7)
+
+        sep = Line(LEFT * 6.2, RIGHT * 6.2, color=YELLOW_A, stroke_width=1.5)
+        sep.next_to(q_label, DOWN, buff=0.22)
+        self.play(Create(sep), run_time=0.4)
+        self.wait(0.3)
+{steps_code}
+
+        ans_text = Text("{answer_line}", font_size=30)
+        ans_text.set_color_by_gradient(GREEN_A, YELLOW_A)
+        ans_text.to_edge(DOWN, buff=0.6)
+        ans_box = RoundedRectangle(
+            corner_radius=0.15,
+            width=ans_text.width + 0.8,
+            height=ans_text.height + 0.4,
+            color=GOLD,
+            stroke_width=2,
+        )
+        ans_box.move_to(ans_text)
+        self.play(Create(ans_box), FadeIn(ans_text), run_time=1.0)
+        self.play(Flash(ans_text.get_center(), color=GOLD, flash_radius=0.8), run_time=0.7)
+        self.wait(2.5)
+"""
+
+
+def _extract_error_context(stderr: str, script_path: str, code: str) -> str:
+    """
+    Pull the most useful details out of a Manim traceback so the LLM can
+    fix the code on retry without re-reading the whole stderr dump.
+    Returns a compact, actionable error summary.
+    """
+    lines = stderr.splitlines()
+    # Find the last '> NNN  code line' pattern Manim uses in its rich traceback
+    error_line_no = None
+    error_src = None
+    for ln in reversed(lines):
+        m = re.search(r"[>|]\s*(\d+)\s+(.*)", ln)
+        if m:
+            error_line_no = int(m.group(1))
+            error_src = m.group(2).strip()
+            break
+
+    # Find the exception type + message — last line that looks like an exception
+    exc_line = ""
+    for ln in reversed(lines):
+        ln_stripped = ln.strip()
+        if re.match(r"[A-Z][a-zA-Z]+Error|NameError|TypeError|AttributeError|ValueError", ln_stripped):
+            exc_line = ln_stripped
+            break
+
+    # Grab ±3 lines of context from the actual saved script
+    context_snippet = ""
+    if error_line_no:
+        try:
+            script_lines = Path(script_path).read_text(encoding="utf-8").splitlines()
+            lo = max(0, error_line_no - 4)
+            hi = min(len(script_lines), error_line_no + 3)
+            numbered = [
+                (">>> " if i + 1 == error_line_no else "    ") + f"{i+1}: {script_lines[i]}"
+                for i in range(lo, hi)
+            ]
+            context_snippet = "\nCode around the crash:\n" + "\n".join(numbered)
+        except Exception:
+            pass
+
+    summary = f"ERROR: {exc_line}\n"
+    if error_line_no:
+        summary += f"Crashed at line {error_line_no}: {error_src}"
+    summary += context_snippet
+    return summary
 
 
 def _extract_code_block(text: str) -> str:
@@ -136,20 +618,91 @@ def _ensure_scene_class(code: str) -> str:
     return code
 
 
-def run_manim_animation(manim_code: str, problem_slug: str = "animation") -> dict:
+async def _narrate_async(text: str, mp3_path: Path) -> bool:
+    """Generate TTS narration using edge-tts and save to mp3_path."""
+    import edge_tts
+    communicate = edge_tts.Communicate(text[:3000], "en-US-AriaNeural")
+    await communicate.save(str(mp3_path))
+    return mp3_path.exists() and mp3_path.stat().st_size > 0
+
+
+def _generate_narration(text: str, mp3_path: Path) -> bool:
+    """Synchronous wrapper: generate TTS audio in an isolated thread to avoid
+    conflicting with ADK's running event loop."""
+    import concurrent.futures
+
+    def _run_in_thread() -> bool:
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
+        try:
+            return loop.run_until_complete(_narrate_async(text, mp3_path))
+        finally:
+            loop.close()
+
+    try:
+        with concurrent.futures.ThreadPoolExecutor(max_workers=1) as pool:
+            return pool.submit(_run_in_thread).result(timeout=60)
+    except Exception:
+        return False
+
+
+def _merge_audio_video(video: Path, audio: Path, out: Path, ffmpeg_exe: str) -> bool:
+    """Merge narration MP3 into video MP4 using ffmpeg. Returns True on success."""
+    cmd = [
+        ffmpeg_exe, "-y",
+        "-i", str(video),
+        "-i", str(audio),
+        "-c:v", "copy", "-c:a", "aac", "-shortest",
+        str(out),
+    ]
+    result = subprocess.run(cmd, capture_output=True, timeout=120)
+    return result.returncode == 0 and out.exists()
+
+
+def _add_narration(video_path: str, solution_text: str, ffmpeg_exe: str) -> str:
+    """Add TTS narration to a rendered video. Returns narrated path, or original on failure."""
+    if not solution_text or not solution_text.strip():
+        return video_path
+    try:
+        vp = Path(video_path)
+        mp3_path = vp.with_suffix(".mp3")
+        out_path = vp.with_name(vp.stem + "_narrated.mp4")
+        if _generate_narration(solution_text, mp3_path):
+            if _merge_audio_video(vp, mp3_path, out_path, ffmpeg_exe):
+                mp3_path.unlink(missing_ok=True)
+                return str(out_path)
+    except Exception:
+        pass
+    return video_path
+
+
+def run_manim_animation(
+    manim_code: str,
+    problem_slug: str = "animation",
+    question: str = "",
+    solution_text: str = "",
+) -> dict:
     """
     Save the provided Manim code to a Python file and execute it.
+    If rendering fails AND solution_text is provided, an auto-fallback
+    text-based animation is rendered instead so the student always
+    receives a video.
 
     Args:
-        manim_code:   The complete Python/Manim code as a string.
-        problem_slug: A short slug used to name the output file (no spaces).
+        manim_code:    The complete Python/Manim code as a string.
+        problem_slug:  A short slug used to name the output file (no spaces).
+        question:      The original math/physics question (used in fallback video).
+        solution_text: The full step-by-step solution text (used in fallback video).
+                       ALWAYS provide this so a fallback video can be generated
+                       automatically if the creative script fails to render.
 
     Returns:
         A dict with keys:
           - status: 'success' or 'error'
           - video_path: path to the produced .mp4 (on success)
           - script_path: path to the saved .py file
-          - message: human-readable status message
+          - message: human-readable status message (contains [FALLBACK VIDEO] tag
+                     if the guaranteed fallback was used instead of the creative script)
           - stdout / stderr: command output
     """
     # 1. Strip markdown fences if present
@@ -165,72 +718,282 @@ def run_manim_animation(manim_code: str, problem_slug: str = "animation") -> dic
     if "from manim import" not in clean_code and "import manim" not in clean_code:
         clean_code = "from manim import *\n\n" + clean_code
 
-    # Save the script
+    # 5. Pre-validate Python syntax — catch errors immediately so the LLM can fix
+    #    them without waiting for a full 10-minute render attempt to fail.
+    import ast as _ast
+    try:
+        _ast.parse(clean_code)
+    except SyntaxError as _se:
+        # Save the bad script anyway so the LLM can inspect it
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        slug = re.sub(r"[^\w]", "_", problem_slug)[:40]
+        _bad_path = ANIMATIONS_DIR / f"{slug}_{timestamp}_syntax_err.py"
+        _bad_path.write_text(clean_code, encoding="utf-8")
+        bad_line_text = (clean_code.splitlines()[_se.lineno - 1] if _se.lineno else "")
+        return {
+            "status": "error",
+            "video_path": None,
+            "script_path": str(_bad_path),
+            "message": (
+                f"Python syntax error in generated code — fix before rendering.\n"
+                f"Line {_se.lineno}: {_se.msg}\n"
+                f"  >>> {bad_line_text.strip()}\n\n"
+                "Fix the syntax and call run_manim_animation again with the corrected script."
+            ),
+            "stdout": "",
+            "stderr": f"SyntaxError at line {_se.lineno}: {_se.msg}",
+        }
+
+    # ── Save the script ───────────────────────────────────────────────────────
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
     slug = re.sub(r"[^\w]", "_", problem_slug)[:40]
     script_name = f"{slug}_{timestamp}.py"
     script_path = ANIMATIONS_DIR / script_name
     script_path.write_text(clean_code, encoding="utf-8")
 
-    # Output media sub-dir that Manim will create
+    # ── Output directories ────────────────────────────────────────────────────
+    # ALL rendered videos are stored under outputs/animations/media/videos/
+    # (Manim auto-creates the /videos/<scene>/<quality>/ subfolder hierarchy)
     media_dir = ANIMATIONS_DIR / "media"
+    media_dir.mkdir(parents=True, exist_ok=True)
 
-    # Run manim from the PROJECT ROOT so Python imports resolve
-    project_root = str(_BASE_DIR)
+    # ── Write manim.cfg into ANIMATIONS_DIR ───────────────────────────────────
+    # Use the absolute POSIX path so Manim never falls back to a different location
+    # even on Windows paths that contain spaces.
+    quality = os.getenv("MANIM_QUALITY", "m")  # m=720p30 (default — good classroom quality, ~60s render)  l=480p15  h=1080p60  k=4K
+    (ANIMATIONS_DIR / "manim.cfg").write_text(
+        "[CLI]\n"
+        f"media_dir = {media_dir.as_posix()}\n"
+        "verbosity = WARNING\n",
+        encoding="utf-8",
+    )
 
-    # -ql = low quality (faster render); use absolute paths
+    # ── Build manim command ───────────────────────────────────────────────────
     cmd = [
         sys.executable, "-m", "manim",
         "render",
-        "-ql",
-        "--media_dir", str(media_dir),
+        f"-q{quality}",               # high quality: 1080p60 by default
+        "--media_dir", str(media_dir),  # explicit CLI override
         str(script_path),
         "MathAnimationScene",
     ]
 
+    # Ensure PYTHONPATH includes the project root so any local imports work
+    env = os.environ.copy()
+    env["PYTHONPATH"] = str(_BASE_DIR)
+
+    # ── Ensure ffmpeg is discoverable by Manim ────────────────────────────────
+    # Manim calls ffmpeg to combine partial_movie_files into the final mp4.
+    # We guarantee at least one of these is on PATH:
+    #   1. The venv Scripts dir (we copy ffmpeg.exe there on first run)
+    #   2. The imageio_ffmpeg bundled binary directory (fallback)
+    venv_scripts = Path(sys.executable).parent        # e.g. .venv/Scripts
+    path_parts = env.get("PATH", "").split(os.pathsep)
+    if str(venv_scripts) not in path_parts:
+        path_parts.insert(0, str(venv_scripts))
+
+    # Also add imageio_ffmpeg binary dir if available and ffmpeg.exe not yet on PATH
+    import shutil as _shutil
+    if not _shutil.which("ffmpeg", path=os.pathsep.join(path_parts)):
+        try:
+            import imageio_ffmpeg as _ioff
+            _ff_src = Path(_ioff.get_ffmpeg_exe())
+            _ff_dst = venv_scripts / "ffmpeg.exe"
+            if not _ff_dst.exists() and _ff_src.exists():
+                import shutil as _sh
+                _sh.copy2(_ff_src, _ff_dst)
+            path_parts.insert(0, str(_ff_src.parent))
+        except Exception:
+            pass
+
+    env["PATH"] = os.pathsep.join(path_parts)
+    ffmpeg_exe = _shutil.which("ffmpeg", path=env["PATH"]) or "ffmpeg"
+
     try:
+        render_start_time = time.time() - 2  # 2-second grace window for filesystem lag
         result = subprocess.run(
             cmd,
             capture_output=True,
             text=True,
-            timeout=300,
-            cwd=project_root,   # run from project root, not animations dir
+            timeout=600,               # 1080p60 renders can take several minutes
+            cwd=str(ANIMATIONS_DIR),   # manim.cfg is here; default media/ lands here too
+            env=env,
         )
 
         stdout = result.stdout
         stderr = result.stderr
 
-        if result.returncode == 0:
-            video_search = list(media_dir.rglob("MathAnimationScene.mp4"))
-            if video_search:
-                video_path = str(sorted(video_search, key=lambda p: p.stat().st_mtime)[-1])
-            else:
-                video_path = "Video rendered — check outputs/animations/media/"
+        # ── Locate the rendered video ─────────────────────────────────────────
+        # Manim creates: <media_dir>/videos/<script_stem>/<quality_folder>/MathAnimationScene.mp4
+        # We search recursively BUT only accept videos created/modified AFTER
+        # we started this render, so we never accidentally return a stale video
+        # from a previous run.
+        def _latest_mp4(search_root: Path, min_mtime: float = 0.0) -> Path | None:
+            if not search_root.exists():
+                return None
+            hits = [
+                p for p in search_root.rglob("MathAnimationScene.mp4")
+                if p.is_file() and p.stat().st_size > 0
+                and p.stat().st_mtime >= min_mtime
+            ]
+            if not hits:
+                return None
+            return sorted(hits, key=lambda p: p.stat().st_mtime)[-1]
 
+        _quality_labels = {"l": "480p15", "m": "720p30", "h": "1080p60", "p": "1440p60", "k": "2160p60"}
+        quality_label = _quality_labels.get(quality, quality)
+
+        # Search only inside the canonical outputs/animations/media directory.
+        # Never fall back to the root-level media/ folder — that avoids stale
+        # videos from previous runs being reported as the current render.
+        video_path_obj = _latest_mp4(media_dir, min_mtime=render_start_time)
+        video_path = str(video_path_obj) if video_path_obj else None
+
+        if video_path and Path(video_path).is_file() and Path(video_path).stat().st_size > 0:
+            video_path = _add_narration(video_path, solution_text, ffmpeg_exe)
             return {
                 "status": "success",
                 "video_path": video_path,
                 "script_path": str(script_path),
-                "message": "Animation rendered successfully!",
-                "stdout": stdout[-3000:] if len(stdout) > 3000 else stdout,
-                "stderr": stderr[-1000:] if len(stderr) > 1000 else stderr,
+                "message": (
+                    f"Animation rendered successfully at {quality_label}!\n"
+                    f"VIDEO SAVED AT: {video_path}\n"
+                    f"Script saved at: {script_path}"
+                ),
+                "stdout": stdout[-2000:] if len(stdout) > 2000 else stdout,
+                "stderr": stderr[-500:] if len(stderr) > 500 else stderr,
             }
-        else:
+
+        if result.returncode != 0:
+            error_summary = _extract_error_context(stderr, str(script_path), clean_code)
+
+            # ── GUARANTEED FALLBACK VIDEO ─────────────────────────────────────────
+            # If solution_text was supplied, auto-render a safe text-only animation
+            # so the student ALWAYS gets a video, no matter what the LLM code does.
+            if solution_text.strip():
+                _fb_code = _generate_fallback_code(problem_slug, question, solution_text)
+                _fb_code = _sanitize_no_latex(_fb_code)
+                _fb_path = ANIMATIONS_DIR / f"{slug}_{timestamp}_textonly.py"
+                _fb_path.write_text(_fb_code, encoding="utf-8")
+                try:
+                    _fb_proc = subprocess.run(
+                        [
+                            sys.executable, "-m", "manim", "render", "-ql",
+                            # Fallback is text-only: low quality renders in ~15s
+                            # vs 5-8 min at 1080p — no need to re-punish the user
+                            "--media_dir", str(media_dir),
+                            str(_fb_path), "MathAnimationScene",
+                        ],
+                        capture_output=True, text=True,
+                        timeout=90,
+                        cwd=str(ANIMATIONS_DIR),
+                        env=env,
+                    )
+                    _fb_video = _latest_mp4(media_dir, min_mtime=render_start_time)
+                    if _fb_video and _fb_video.is_file() and _fb_video.stat().st_size > 0:
+                        _fb_video_path = _add_narration(str(_fb_video), solution_text, ffmpeg_exe)
+                        return {
+                            "status": "success",
+                            "video_path": _fb_video_path,
+                            "script_path": str(_fb_path),
+                            "message": (
+                                f"[FALLBACK VIDEO] The creative animation script had an error, "
+                                f"but a clean text-based solution video was auto-generated.\n"
+                                f"VIDEO SAVED AT: {_fb_video}\n"
+                                f"Script saved at: {_fb_path}\n\n"
+                                f"The student can watch their full solution right now.\n"
+                                f"Optional: fix the original error and retry for the creative version:\n"
+                                f"{error_summary[:400]}"
+                            ),
+                            "stdout": (_fb_proc.stdout or "")[-1000:],
+                            "stderr": "",
+                        }
+                except Exception:
+                    pass   # fallback itself failed — return the original error below
+            # ─────────────────────────────────────────────────────────────────────
+
             return {
                 "status": "error",
                 "video_path": None,
                 "script_path": str(script_path),
-                "message": f"Manim render failed with exit code {result.returncode}",
-                "stdout": stdout[-3000:] if len(stdout) > 3000 else stdout,
+                "message": (
+                    f"Manim render failed.\n\n"
+                    f"{error_summary}\n\n"
+                    "INSTRUCTIONS FOR RETRY:\n"
+                    "1. Read the ERROR line and the code snippet above carefully.\n"
+                    "2. Fix ONLY the broken lines — do not rewrite unrelated parts.\n"
+                    "3. Common causes:\n"
+                    "   - Calling a method that doesn't exist on Text/Mobject (use simple transforms instead)\n"
+                    "   - Using RIGHT/UP/LEFT/DOWN.copy().rotate() — use np.array([np.cos(a),np.sin(a),0]) instead\n"
+                    "   - Undefined rate_func name — only use: linear, smooth, there_and_back, ease_out_bounce, rush_into, rush_from\n"
+                    "   - VGroup(*self.mobjects) — use Group(*self.mobjects)\n"
+                    "   - MathTex/Tex — use Text() with Unicode\n"
+                    "4. Call run_manim_animation again with corrected code AND solution_text."
+                ),
+                "stdout": stdout[-2000:] if len(stdout) > 2000 else stdout,
                 "stderr": stderr[-3000:] if len(stderr) > 3000 else stderr,
             }
+
+        # Render completed with returncode=0 but no video found — try fallback too
+        if solution_text.strip():
+            _fb_code2 = _generate_fallback_code(problem_slug, question, solution_text)
+            _fb_code2 = _sanitize_no_latex(_fb_code2)
+            _fb_path2 = ANIMATIONS_DIR / f"{slug}_{timestamp}_textonly.py"
+            _fb_path2.write_text(_fb_code2, encoding="utf-8")
+            try:
+                subprocess.run(
+                    [
+                        sys.executable, "-m", "manim", "render", "-ql",
+                        "--media_dir", str(media_dir),
+                        str(_fb_path2), "MathAnimationScene",
+                    ],
+                    capture_output=True, text=True,
+                    timeout=90,
+                    cwd=str(ANIMATIONS_DIR),
+                    env=env,
+                )
+                _fb_video2 = _latest_mp4(media_dir, min_mtime=render_start_time)
+                if _fb_video2 and _fb_video2.is_file() and _fb_video2.stat().st_size > 0:
+                    _fb_video2_path = _add_narration(str(_fb_video2), solution_text, ffmpeg_exe)
+                    return {
+                        "status": "success",
+                        "video_path": _fb_video2_path,
+                        "script_path": str(_fb_path2),
+                        "message": (
+                            f"[FALLBACK VIDEO] Creative script produced no output — "
+                            f"a text-based solution video was auto-generated.\n"
+                            f"VIDEO SAVED AT: {_fb_video2}\n"
+                        ),
+                        "stdout": "",
+                        "stderr": "",
+                    }
+            except Exception:
+                pass
+
+        return {
+            "status": "error",
+            "video_path": None,
+            "script_path": str(script_path),
+            "message": (
+                f"Render completed (returncode={result.returncode}) but no valid video file was found.\n"
+                f"Searched in: {media_dir / 'videos'} (recursively).\n"
+                "This usually means Manim ran but wrote no output — check stderr for warnings.\n"
+                "INSTRUCTIONS FOR RETRY:\n"
+                "1. Inspect stderr for any Manim warnings about the scene not rendering.\n"
+                "2. Ensure the class is named MathAnimationScene and the construct() method is not empty.\n"
+                "3. Always pass solution_text= so the auto-fallback can trigger.\n"
+                "4. Fix the script and call run_manim_animation again."
+            ),
+            "stdout": stdout[-2000:] if len(stdout) > 2000 else stdout,
+            "stderr": stderr[-1000:] if len(stderr) > 1000 else stderr,
+        }
 
     except subprocess.TimeoutExpired:
         return {
             "status": "error",
             "video_path": None,
             "script_path": str(script_path),
-            "message": "Animation rendering timed out after 5 minutes.",
+            "message": f"Animation rendering timed out after {600 // 60} minutes (quality={quality}). Set MANIM_QUALITY=l for faster renders.",
             "stdout": "",
             "stderr": "TimeoutExpired",
         }

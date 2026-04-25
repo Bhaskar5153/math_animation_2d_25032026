@@ -18,19 +18,28 @@ Usage (ADK Web UI):
     adk web
 """
 import asyncio
+import importlib
 import os
+import random
 import sys
 import uuid
 from contextlib import asynccontextmanager
 
 from dotenv import load_dotenv
+
+# Load environment variables (.env file must have GOOGLE_API_KEY or PROJECT_ID)
+load_dotenv()
+
+# Apply genai HTTP-level retry patch BEFORE any google.genai client is created.
+import _retry_patch  # noqa: F401
+
+# Configure Vertex AI credentials or API key authentication
+import vertex_ai_config  # noqa: F401
+
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, HTMLResponse
 from pydantic import BaseModel
-
-# Load environment variables (.env file must have GOOGLE_API_KEY)
-load_dotenv()
 
 # ---------------------------------------------------------------------------
 # ADK imports
@@ -54,17 +63,58 @@ _session_service = InMemorySessionService()
 APP_NAME = "mathviz"
 
 
-async def run_math_question(question: str, session_id: str | None = None) -> str:
+def _is_retryable_error(exc: Exception) -> bool:
+    """Return True for transient API errors (503, quota, UNAVAILABLE)."""
+    msg = str(exc).lower()
+    return any(k in msg for k in (
+        "503", "502", "unavailable", "high demand", "overloaded",
+        "resource_exhausted", "rate limit", "429", "quota",
+        "try again", "temporarily", "internal error", "500",
+    ))
+
+
+# ---------------------------------------------------------------------------
+# Agent module names (used for reloading when switching fallback model)
+# ---------------------------------------------------------------------------
+_AGENT_MODULES = [
+    "agents.math_solver_agent",
+    "agents.solution_writer_agent",
+    "agents.story_agent",
+    "agents.animation_agent",
+    "agents.orchestrator_agent",
+    "agents",
+]
+
+
+def _evict_agent_modules() -> None:
+    """Remove all agent modules from sys.modules so the next import is fresh."""
+    for key in list(sys.modules.keys()):
+        if key.startswith("agents"):
+            del sys.modules[key]
+
+
+async def run_math_question(
+    question: str,
+    session_id: str | None = None,
+    *,
+    _model_override: str | None = None,
+) -> str:
     """
     Run the MathViz agent pipeline for a given question.
 
     Args:
-        question:   The math question from the student.
-        session_id: Optional session ID for conversation continuity.
+        question:        The math question from the student.
+        session_id:      Optional session ID for conversation continuity.
+        _model_override: Internal — forces a specific model (used for fallback).
 
     Returns:
         The full agent response text.
     """
+    # ── Model override: reload agents with a different model if requested ────
+    if _model_override is not None:
+        _evict_agent_modules()
+        os.environ["GEMINI_MODEL"] = _model_override
+
     root_agent = _get_root_agent()
 
     if session_id is None:
@@ -88,19 +138,83 @@ async def run_math_question(question: str, session_id: str | None = None) -> str
 
     user_message = Content(parts=[Part(text=question)])
 
-    full_response = []
-    async for event in runner.run_async(
-        user_id="student",
-        session_id=session_id,
-        new_message=user_message,
-    ):
-        if event.is_final_response():
-            if event.content and event.content.parts:
-                for part in event.content.parts:
-                    if part.text:
-                        full_response.append(part.text)
+    # Retry with fast exponential backoff for transient API errors.
+    # Delays: ~5 s, ~15 s, ~30 s, ~60 s  → up to ~2 minutes total wait.
+    max_attempts = 4
+    delays = [5, 15, 30, 60]  # seconds between retries
+    last_exc: Exception | None = None
 
-    return "\n".join(full_response) if full_response else "No response generated."
+    for attempt in range(1, max_attempts + 1):
+        try:
+            full_response = []
+            async for event in runner.run_async(
+                user_id="student",
+                session_id=session_id,
+                new_message=user_message,
+            ):
+                if event.is_final_response():
+                    if event.content and event.content.parts:
+                        for part in event.content.parts:
+                            if part.text:
+                                full_response.append(part.text)
+            return "\n".join(full_response) if full_response else "No response generated."
+        except Exception as exc:
+            last_exc = exc
+            if _is_retryable_error(exc) and attempt < max_attempts:
+                wait = delays[attempt - 1] + random.uniform(0, 5)
+                print(
+                    f"[MathViz] API unavailable (attempt {attempt}/{max_attempts}): {exc}\n"
+                    f"          Retrying in {wait:.0f}s… "
+                    f"(model: {os.getenv('GEMINI_MODEL', 'gemini-2.5-pro')})"
+                )
+                await asyncio.sleep(wait)
+                # Fresh session for retry so stale state doesn't cause issues
+                session_id = str(uuid.uuid4())
+                try:
+                    await _session_service.create_session(
+                        app_name=APP_NAME, user_id="student", session_id=session_id
+                    )
+                except Exception:
+                    pass
+            else:
+                raise
+
+    # ── All primary retries exhausted — try fallback model ───────────────────
+    # If we're NOT already on the fallback (avoid infinite recursion), try
+    # gemini-2.0-flash which is a lighter model less likely to be overloaded.
+    if last_exc is not None and _is_retryable_error(last_exc) and _model_override is None:
+        primary_model = os.getenv("GEMINI_MODEL", "gemini-2.5-pro")
+        fallback_model = os.getenv("GEMINI_FALLBACK_MODEL", "gemini-2.0-flash")
+        if fallback_model != primary_model:
+            print(
+                f"[MathViz] All retries exhausted for {primary_model}. "
+                f"Switching to fallback model: {fallback_model}"
+            )
+            try:
+                result = await run_math_question(
+                    question,
+                    _model_override=fallback_model,
+                )
+                # Restore original model for subsequent requests
+                _evict_agent_modules()
+                os.environ.pop("GEMINI_MODEL", None)
+                return result
+            except Exception as fb_exc:
+                print(f"[MathViz] Fallback model also failed: {fb_exc}")
+                # Restore original model
+                _evict_agent_modules()
+                os.environ.pop("GEMINI_MODEL", None)
+                raise ServerError503(
+                    f"The Gemini API is currently experiencing high demand."
+                    f" Both {primary_model} and the fallback {fallback_model} are unavailable."
+                    f" Please wait a few minutes and try again.\n\nOriginal error: {last_exc}"
+                ) from last_exc
+
+    raise last_exc  # type: ignore[misc]  # should be unreachable but keeps type-checker happy
+
+
+class ServerError503(RuntimeError):
+    """Raised when all Gemini API retry attempts (including fallback model) are exhausted."""
 
 
 # ---------------------------------------------------------------------------
@@ -228,6 +342,18 @@ async def solve_math_question(request: MathQuestionRequest):
             session_id=session_id,
             response=response_text,
             status="success",
+        )
+    except ServerError503 as exc:
+        return MathQuestionResponse(
+            question=request.question,
+            session_id=session_id,
+            response=(
+                "⚠️ The Gemini API is currently overloaded (503 High Demand). "
+                "This is a temporary issue on Google's side. "
+                "Please wait a few minutes and resubmit your question.\n\n"
+                f"Detail: {exc}"
+            ),
+            status="error_503_unavailable",
         )
     except Exception as exc:
         return MathQuestionResponse(
