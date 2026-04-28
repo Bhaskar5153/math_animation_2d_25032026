@@ -2,9 +2,9 @@
 Animation Agent -- generates complete Manim 2D animation Python code based on
 the math solution and animation story, then executes it to produce a video.
 """
-import os
-
 from google.adk.agents import LlmAgent
+
+from config import models
 from prompts.animation_prompts import ANIMATION_AGENT_INSTRUCTION
 from tools.animation_runner import run_manim_animation, list_animations
 
@@ -42,18 +42,20 @@ ANIMATION_AGENT_FULL_INSTRUCTION = (
    - Class: `MathAnimationScene(Scene)`
    - Import: `from manim import *`
    - Implement all story scenes within `construct(self)`
-4. **Call** `run_manim_animation` tool with ALL FOUR parameters:
+4. **Call** `run_manim_animation` tool with ALL FIVE parameters:
    - `manim_code`: the complete Python script as a string
    - `problem_slug`: a short slug derived from the question (no spaces, max 30 chars)
    - `question`: the exact original math/physics question (copy it verbatim)
    - `solution_text`: the full step-by-step solution text (copy the complete solution from INPUTS above)
-   CRITICAL: Always pass `question` and `solution_text`. These enable an automatic
-   guaranteed fallback video if your creative script has any runtime errors.
+   - `narration_script`: the full ANIMATION STORY text (copy it verbatim from INPUTS above)
+   CRITICAL: Always pass `question`, `solution_text`, and `narration_script`. The narration_script
+   makes the audio sound like the story characters are talking, not reading equations.
+   solution_text enables the automatic guaranteed fallback video if your creative script fails.
 5. **Report** the result:
    - If `status == 'success'` and message contains `[FALLBACK VIDEO]`: a clean text-based
      solution animation was auto-generated because the creative script failed. Report the
-     video path to the user with a note that the solution is fully visible, then attempt
-     one more retry with fixed creative code if the error is clear.
+     video path to the user with a note that the full step-by-step solution is visible.
+     Do NOT retry -- the student has a complete, working video. Present it immediately.
    - If `status == 'success'` with no `[FALLBACK VIDEO]`: the creative animation succeeded.
      Report the video_path, script_path, and what was animated.
    - If `status == 'error'`: read the message and retry (see Retry Logic below).
@@ -97,7 +99,9 @@ If `run_manim_animation` returns `status == 'error'`:
    - Any other error -> fix the specific lines shown in the code snippet
 3. Fix ONLY the broken section. Keep all other animations intact.
 4. Call `run_manim_animation` again with the corrected full script AND with `question` and `solution_text` again.
-5. Repeat up to **3** total attempts. Never report failure without attempting all 3.
+5. Repeat up to **1** retry (2 total attempts maximum). If the second attempt also fails,
+   the system's automatic fallback guarantees a video — report it and stop. Do NOT attempt
+   a third cycle; it wastes minutes and the student already has a working video.
 
 ## ABSOLUTE GUARANTEE -- You must ALWAYS deliver a video
 The `run_manim_animation` tool has a built-in auto-fallback: if your creative script fails
@@ -108,7 +112,8 @@ almost always. Your job is to maximise creative quality; the system guarantees d
 NEVER tell the user "no video was produced" without first verifying that:
 - You have called `run_manim_animation` at least once
 - You passed both `question=` and `solution_text=` in that call
-If you did both and still got `status == 'error'`, retry up to 3 times as described above.
+If you did both and still got `status == 'error'`, try once more with the corrected script,
+then accept whatever the system delivers. Never exceed 2 total attempts.
 """
 )
 
@@ -118,7 +123,7 @@ animation_agent = LlmAgent(
     # gemini-2.5-pro is required: complex Manim code generation fails with flash
     # (undefined variables, IndexError, wrong API calls → render failures + retries)
     # Switching to flash saves ~60s on LLM but costs 8+ min extra on render retries.
-    model=os.getenv("ANIMATION_MODEL", "gemini-2.5-pro"),
+    model=models.animation,
     description=(
         "Elite Manim 2D animation code generator for math AND physics problems. "
         "Handles all math domains (algebra, calculus, geometry, statistics, trigonometry) "

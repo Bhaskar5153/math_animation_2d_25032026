@@ -22,9 +22,9 @@ Why this is faster than the previous layout:
        animation_agent starts the moment story_agent finishes.
        solution_writer's ~15 s is hidden inside animation_agent's ~40 s LLM call.
 """
-import os
-
 from google.adk.agents import LlmAgent, ParallelAgent, SequentialAgent
+
+from config import models
 
 from agents.math_solver_agent import math_solver_agent
 from agents.solution_writer_agent import solution_writer_agent
@@ -63,7 +63,7 @@ mathviz_pipeline = SequentialAgent(
 # Root agent: routes greetings vs math questions
 root_agent = LlmAgent(
     name="mathviz_orchestrator",
-    model=os.getenv("GEMINI_MODEL", "gemini-2.5-pro"),
+    model=models.primary,
     description="MathViz assistant. Greets users and routes math/physics questions to the animation pipeline.",
     instruction="""\
 You are MathViz, a friendly math and physics animation assistant.

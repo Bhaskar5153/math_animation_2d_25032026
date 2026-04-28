@@ -2,9 +2,9 @@
 Solution Writer Agent -- takes a solved math problem and saves it as a
 well-formatted markdown file with step-by-step instructions.
 """
-import os
-
 from google.adk.agents import LlmAgent
+
+from config import models
 from tools.file_tools import save_solution_markdown, read_solution_markdown, list_solutions
 
 SOLUTION_WRITER_INSTRUCTION = """
@@ -58,7 +58,7 @@ to verify a saved file.
 
 solution_writer_agent = LlmAgent(
     name="solution_writer_agent",
-    model=os.getenv("FAST_MODEL", "gemini-2.5-flash"),
+    model=models.fast,
     description=(
         "Writes and saves math and physics solutions as structured, student-friendly markdown "
         "files with step-by-step instructions. Handles all math domains and physics domains "

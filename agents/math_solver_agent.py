@@ -6,14 +6,14 @@ Math Solver Agent -- a single, powerful LlmAgent that:
 
 No sub-agent routing -- single agent handles all domains for reliability.
 """
-import os
-
 from google.adk.agents import LlmAgent
+
+from config import models
 from prompts.math_prompts import MATH_SOLVER_INSTRUCTION
 
 math_solver_agent = LlmAgent(
     name="math_solver_agent",
-    model=os.getenv("GEMINI_MODEL", "gemini-2.5-pro"),
+    model=models.primary,
     description=(
         "Expert math solver. Identifies the domain (algebra, geometry, calculus, "
         "statistics, trigonometry, arithmetic, number theory) and produces a full "

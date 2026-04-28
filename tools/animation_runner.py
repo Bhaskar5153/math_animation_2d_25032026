@@ -2,6 +2,7 @@
 Animation runner tool — saves Manim code and executes it to produce a video.
 """
 import asyncio
+import concurrent.futures
 import os
 import re
 import subprocess
@@ -10,8 +11,11 @@ import time
 from datetime import datetime
 from pathlib import Path
 
-_BASE_DIR = Path(__file__).resolve().parent.parent
-ANIMATIONS_DIR = _BASE_DIR / "outputs" / "animations"
+from config import audio as audio_cfg
+from config import manim as manim_cfg
+from config import output as output_cfg
+
+ANIMATIONS_DIR = output_cfg.animations_dir
 ANIMATIONS_DIR.mkdir(parents=True, exist_ok=True)
 
 
@@ -263,13 +267,14 @@ def _sanitize_no_latex(code: str) -> str:
     code = re.sub(r",?\s*\"include_numbers\"\s*:\s*True", "", code)
     code = re.sub(r",?\s*'include_numbers'\s*:\s*True", "", code)
 
-    # 11. Replace RIGHT/LEFT/UP/DOWN.copy().rotate(angle) → np.array([cos,sin,0])
-    #     Direction constants are numpy arrays — they have no .rotate() method.
+    # 11. Replace direction_constant[.copy()].rotate(angle) → np.array([cos,sin,0])
+    #     Manim direction constants (RIGHT/UP/UR etc.) are numpy arrays — no .rotate().
+    #     Covers: RIGHT LEFT UP DOWN UR UL DR DL, with or without .copy().
     def _dir_rotate_repl(m):
         angle_expr = m.group(1)
         return f"np.array([np.cos({angle_expr}), np.sin({angle_expr}), 0])"
     code = re.sub(
-        r"(?:RIGHT|LEFT|UP|DOWN)\.copy\(\)\.rotate\(([^)]+)\)",
+        r"(?:RIGHT|LEFT|UP|DOWN|UR|UL|DR|DL)(?:\.copy\(\))?\.rotate\(([^)]+)\)",
         _dir_rotate_repl,
         code,
     )
@@ -301,6 +306,40 @@ def _sanitize_no_latex(code: str) -> str:
         ".submobjects[0]",
         code,
     )
+
+    # 14b. Replace non-existent animation classes → safe equivalents.
+    #      SpinIn / SpinOut are LLM-invented — not in Manim 0.20.
+    #      Regex captures the first positional arg (the mobject variable name).
+    code = re.sub(r"\bSpinIn\s*\((\w+(?:\.\w+)*)[^)]*\)", r"FadeIn(\1)", code)
+    code = re.sub(r"\bSpinOut\s*\((\w+(?:\.\w+)*)[^)]*\)", r"FadeOut(\1)", code)
+    # SpiralIn / FlyIn / ZoomIn are also common LLM inventions
+    code = re.sub(r"\bSpiralIn\s*\((\w+(?:\.\w+)*)[^)]*\)", r"GrowFromCenter(\1)", code)
+    code = re.sub(r"\bFlyIn\s*\((\w+(?:\.\w+)*)[^)]*\)", r"FadeIn(\1)", code)
+    code = re.sub(r"\bZoomIn\s*\((\w+(?:\.\w+)*)[^)]*\)", r"GrowFromCenter(\1)", code)
+    code = re.sub(r"\bZoomOut\s*\((\w+(?:\.\w+)*)[^)]*\)", r"ShrinkToCenter(\1)", code)
+
+    # 14c. Checkmark / Crossmark: non-existent Manim classes.
+    #      Keep all kwargs (color=, font_size=) intact after replacement.
+    code = re.sub(r"\bCheckmark\s*\(", 'Text("✓", ', code)
+    code = re.sub(r"\bCrossmark\s*\(", 'Text("✗", ', code)
+
+    # 14d-pre. Replace calls to undefined helper self.make_star(...) → Star() mobject.
+    #           make_star is listed in the prompt but never provided as a class method,
+    #           so the LLM sometimes calls it without defining it.
+    code = re.sub(
+        r"\bself\.make_star\s*\([^)]*\)",
+        "Star(n=6, outer_radius=0.4, inner_radius=0.16, color=YELLOW, fill_color=YELLOW, fill_opacity=1)",
+        code,
+    )
+
+    # 14d. Fake direction constants → valid Manim equivalents.
+    code = re.sub(r"\bLEFT_SIDE\b", "LEFT * 7", code)
+    code = re.sub(r"\bRIGHT_SIDE\b", "RIGHT * 7", code)
+    # CENTER is not a Manim constant (use ORIGIN); TOP is not defined (use UP * 3.8).
+    # Only replace when used as an identifier (not inside a string literal — handled
+    # by the fact that these are all-caps identifiers rarely used in text content).
+    code = re.sub(r"\bCENTER\b(?!\s*=)", "ORIGIN", code)
+    code = re.sub(r"\bTOP\b(?!\s*=)", "UP * 3.8", code)
 
     # 14. Remove Mobject.set(...) calls that try to assign custom Python attributes.
     #     e.g.  person.set(head=head, arms=arms)  — Mobject.set() only accepts
@@ -621,29 +660,21 @@ def _ensure_scene_class(code: str) -> str:
 async def _narrate_async(text: str, mp3_path: Path) -> bool:
     """Generate TTS narration using edge-tts and save to mp3_path."""
     import edge_tts
-    communicate = edge_tts.Communicate(text[:3000], "en-US-AriaNeural")
+    communicate = edge_tts.Communicate(text[:audio_cfg.max_chars], audio_cfg.voice)
     await communicate.save(str(mp3_path))
     return mp3_path.exists() and mp3_path.stat().st_size > 0
 
 
-def _generate_narration(text: str, mp3_path: Path) -> bool:
-    """Synchronous wrapper: generate TTS audio in an isolated thread to avoid
-    conflicting with ADK's running event loop."""
-    import concurrent.futures
-
-    def _run_in_thread() -> bool:
-        loop = asyncio.new_event_loop()
-        asyncio.set_event_loop(loop)
-        try:
-            return loop.run_until_complete(_narrate_async(text, mp3_path))
-        finally:
-            loop.close()
-
+def _run_tts_in_thread(text: str, mp3_path: Path) -> bool:
+    """Run TTS in a fresh event loop. Safe to submit to any ThreadPoolExecutor."""
+    loop = asyncio.new_event_loop()
+    asyncio.set_event_loop(loop)
     try:
-        with concurrent.futures.ThreadPoolExecutor(max_workers=1) as pool:
-            return pool.submit(_run_in_thread).result(timeout=60)
+        return loop.run_until_complete(_narrate_async(text, mp3_path))
     except Exception:
         return False
+    finally:
+        loop.close()
 
 
 def _merge_audio_video(video: Path, audio: Path, out: Path, ffmpeg_exe: str) -> bool:
@@ -655,25 +686,9 @@ def _merge_audio_video(video: Path, audio: Path, out: Path, ffmpeg_exe: str) -> 
         "-c:v", "copy", "-c:a", "aac", "-shortest",
         str(out),
     ]
-    result = subprocess.run(cmd, capture_output=True, timeout=120)
+    result = subprocess.run(cmd, capture_output=True, timeout=audio_cfg.merge_timeout)
     return result.returncode == 0 and out.exists()
 
-
-def _add_narration(video_path: str, solution_text: str, ffmpeg_exe: str) -> str:
-    """Add TTS narration to a rendered video. Returns narrated path, or original on failure."""
-    if not solution_text or not solution_text.strip():
-        return video_path
-    try:
-        vp = Path(video_path)
-        mp3_path = vp.with_suffix(".mp3")
-        out_path = vp.with_name(vp.stem + "_narrated.mp4")
-        if _generate_narration(solution_text, mp3_path):
-            if _merge_audio_video(vp, mp3_path, out_path, ffmpeg_exe):
-                mp3_path.unlink(missing_ok=True)
-                return str(out_path)
-    except Exception:
-        pass
-    return video_path
 
 
 def run_manim_animation(
@@ -681,6 +696,7 @@ def run_manim_animation(
     problem_slug: str = "animation",
     question: str = "",
     solution_text: str = "",
+    narration_script: str = "",
 ) -> dict:
     """
     Save the provided Manim code to a Python file and execute it.
@@ -689,12 +705,16 @@ def run_manim_animation(
     receives a video.
 
     Args:
-        manim_code:    The complete Python/Manim code as a string.
-        problem_slug:  A short slug used to name the output file (no spaces).
-        question:      The original math/physics question (used in fallback video).
-        solution_text: The full step-by-step solution text (used in fallback video).
-                       ALWAYS provide this so a fallback video can be generated
-                       automatically if the creative script fails to render.
+        manim_code:       The complete Python/Manim code as a string.
+        problem_slug:     A short slug used to name the output file (no spaces).
+        question:         The original math/physics question (used in fallback video).
+        solution_text:    The full step-by-step solution text (used in fallback video).
+                          ALWAYS provide this so a fallback video can be generated
+                          automatically if the creative script fails to render.
+        narration_script: Character-voiced story text to narrate over the video.
+                          When provided, this is used for TTS instead of solution_text,
+                          so the audio sounds like the story characters talking rather
+                          than reading dry equations. Pass the animation_story here.
 
     Returns:
         A dict with keys:
@@ -705,6 +725,8 @@ def run_manim_animation(
                      if the guaranteed fallback was used instead of the creative script)
           - stdout / stderr: command output
     """
+    # Use character-voiced story for narration when available; fall back to solution text
+    _narration_text = narration_script.strip() or solution_text
     # 1. Strip markdown fences if present
     clean_code = _extract_code_block(manim_code)
 
@@ -760,7 +782,7 @@ def run_manim_animation(
     # ── Write manim.cfg into ANIMATIONS_DIR ───────────────────────────────────
     # Use the absolute POSIX path so Manim never falls back to a different location
     # even on Windows paths that contain spaces.
-    quality = os.getenv("MANIM_QUALITY", "m")  # m=720p30 (default — good classroom quality, ~60s render)  l=480p15  h=1080p60  k=4K
+    quality = manim_cfg.quality  # set in config.yaml: l=480p15  m=720p30  h=1080p60  k=4K
     (ANIMATIONS_DIR / "manim.cfg").write_text(
         "[CLI]\n"
         f"media_dir = {media_dir.as_posix()}\n"
@@ -780,7 +802,7 @@ def run_manim_animation(
 
     # Ensure PYTHONPATH includes the project root so any local imports work
     env = os.environ.copy()
-    env["PYTHONPATH"] = str(_BASE_DIR)
+    env["PYTHONPATH"] = str(ANIMATIONS_DIR.parent.parent)
 
     # ── Ensure ffmpeg is discoverable by Manim ────────────────────────────────
     # Manim calls ffmpeg to combine partial_movie_files into the final mp4.
@@ -809,13 +831,48 @@ def run_manim_animation(
     env["PATH"] = os.pathsep.join(path_parts)
     ffmpeg_exe = _shutil.which("ffmpeg", path=env["PATH"]) or "ffmpeg"
 
+    # ── Start TTS concurrently with the Manim render ──────────────────────────
+    # TTS takes ~30-45 s; the Manim render takes ~90 s.  By submitting TTS to a
+    # background thread NOW, the audio file is ready before the render finishes,
+    # so the merge step is immediate.  Saves ~35-45 s on every animation.
+    _tts_pool: concurrent.futures.ThreadPoolExecutor | None = None
+    _tts_future: "concurrent.futures.Future[bool] | None" = None
+    _mp3_path: Path | None = None
+
+    if audio_cfg.enabled and _narration_text:
+        _mp3_path = script_path.with_suffix(".mp3")
+        _tts_pool = concurrent.futures.ThreadPoolExecutor(
+            max_workers=1, thread_name_prefix="mathviz-tts"
+        )
+        _tts_future = _tts_pool.submit(_run_tts_in_thread, _narration_text, _mp3_path)
+
+    def _finish_with_audio(raw_video: str) -> str:
+        """Wait for the in-flight TTS result and merge into video if available."""
+        if not _tts_future or not _mp3_path:
+            return raw_video
+        try:
+            tts_ok = _tts_future.result(timeout=audio_cfg.generation_timeout)
+        except Exception:
+            tts_ok = False
+        if not tts_ok or not _mp3_path.exists():
+            return raw_video
+        vp = Path(raw_video)
+        out = vp.with_name(vp.stem + "_narrated.mp4")
+        try:
+            if _merge_audio_video(vp, _mp3_path, out, ffmpeg_exe):
+                _mp3_path.unlink(missing_ok=True)
+                return str(out)
+        except Exception:
+            pass
+        return raw_video
+
     try:
         render_start_time = time.time() - 2  # 2-second grace window for filesystem lag
         result = subprocess.run(
             cmd,
             capture_output=True,
             text=True,
-            timeout=600,               # 1080p60 renders can take several minutes
+            timeout=manim_cfg.render_timeout,
             cwd=str(ANIMATIONS_DIR),   # manim.cfg is here; default media/ lands here too
             env=env,
         )
@@ -850,7 +907,7 @@ def run_manim_animation(
         video_path = str(video_path_obj) if video_path_obj else None
 
         if video_path and Path(video_path).is_file() and Path(video_path).stat().st_size > 0:
-            video_path = _add_narration(video_path, solution_text, ffmpeg_exe)
+            video_path = _finish_with_audio(video_path)
             return {
                 "status": "success",
                 "video_path": video_path,
@@ -885,13 +942,13 @@ def run_manim_animation(
                             str(_fb_path), "MathAnimationScene",
                         ],
                         capture_output=True, text=True,
-                        timeout=90,
+                        timeout=manim_cfg.fallback_render_timeout,
                         cwd=str(ANIMATIONS_DIR),
                         env=env,
                     )
                     _fb_video = _latest_mp4(media_dir, min_mtime=render_start_time)
                     if _fb_video and _fb_video.is_file() and _fb_video.stat().st_size > 0:
-                        _fb_video_path = _add_narration(str(_fb_video), solution_text, ffmpeg_exe)
+                        _fb_video_path = _finish_with_audio(str(_fb_video))
                         return {
                             "status": "success",
                             "video_path": _fb_video_path,
@@ -954,7 +1011,7 @@ def run_manim_animation(
                 )
                 _fb_video2 = _latest_mp4(media_dir, min_mtime=render_start_time)
                 if _fb_video2 and _fb_video2.is_file() and _fb_video2.stat().st_size > 0:
-                    _fb_video2_path = _add_narration(str(_fb_video2), solution_text, ffmpeg_exe)
+                    _fb_video2_path = _finish_with_audio(str(_fb_video2))
                     return {
                         "status": "success",
                         "video_path": _fb_video2_path,
@@ -993,7 +1050,10 @@ def run_manim_animation(
             "status": "error",
             "video_path": None,
             "script_path": str(script_path),
-            "message": f"Animation rendering timed out after {600 // 60} minutes (quality={quality}). Set MANIM_QUALITY=l for faster renders.",
+            "message": (
+                f"Animation rendering timed out after {manim_cfg.render_timeout // 60} minutes "
+                f"(quality={quality}). Set MANIM_QUALITY=l for faster renders."
+            ),
             "stdout": "",
             "stderr": "TimeoutExpired",
         }
@@ -1006,6 +1066,9 @@ def run_manim_animation(
             "stdout": "",
             "stderr": str(exc),
         }
+    finally:
+        if _tts_pool is not None:
+            _tts_pool.shutdown(wait=False)
 
 
 

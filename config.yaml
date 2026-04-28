@@ -1,0 +1,88 @@
+# ─────────────────────────────────────────────────────────────────────────────
+# MathViz Configuration
+# ─────────────────────────────────────────────────────────────────────────────
+# Edit this file to change behaviour without touching Python code.
+#
+# Priority (highest → lowest):
+#   1. Shell / environment variable  (e.g. export MANIM_QUALITY=h)
+#   2. This file                     (config.yaml)
+#   3. Built-in defaults             (coded in config.py)
+#
+# Secrets (API keys, project IDs) belong in .env — not here.
+# ─────────────────────────────────────────────────────────────────────────────
+
+# ── AI Models ─────────────────────────────────────────────────────────────────
+# Can also be overridden via GEMINI_MODEL / FAST_MODEL / ANIMATION_MODEL env vars.
+models:
+  primary:   "gemini-2.5-pro"     # Orchestrator, math solver (needs reasoning depth)
+  fast:      "gemini-2.5-flash"   # Story writer, solution writer (speed > depth)
+  animation: "gemini-2.5-pro"     # Animation code gen (Pro reduces render failures)
+  fallback:  "gemini-2.0-flash"   # Used when primary is overloaded / rate-limited
+
+# ── Google Cloud / Vertex AI ──────────────────────────────────────────────────
+# All settings that were previously in .env are now here.
+# config.py will propagate them to the environment variables ADK requires.
+#
+# If use_vertex_ai: true  → uses Application Default Credentials (ADC)
+#                             run: gcloud auth application-default login
+# If use_vertex_ai: false → uses api_key below (or GOOGLE_API_KEY env var)
+google_cloud:
+  project_id:    "${PROJECT_ID}"            # resolved from .env / shell at startup
+  location:      "${GOOGLE_CLOUD_LOCATION}" # resolved from .env / shell at startup
+  use_vertex_ai: "${VERTEXAI}"              # "true"/"false" — resolved from .env
+
+  # Google AI Studio API key — only needed when use_vertex_ai: false.
+  # Set GOOGLE_API_KEY in .env; leave this as the placeholder below.
+  api_key: "${GOOGLE_API_KEY}"
+
+# ── Manim Rendering ───────────────────────────────────────────────────────────
+manim:
+  # Quality presets:
+  #   l = 480p 15fps  (~20s render)   ← fastest, good for quick demos
+  #   m = 720p 30fps  (~90s render)   ← balanced classroom quality  ← default
+  #   h = 1080p 60fps (~3min render)  ← high quality presentations
+  #   k = 2160p 60fps (~10min render) ← 4K, not recommended for classroom
+  quality: "m"
+
+  # Seconds before a stuck creative render is killed (quality m renders in ~90s)
+  render_timeout: 150
+
+  # Seconds for the guaranteed text-only fallback render (always low quality)
+  fallback_render_timeout: 90
+
+# ── Audio Narration (edge-tts) ────────────────────────────────────────────────
+audio:
+  enabled: true                   # Set false to skip TTS and produce silent videos
+
+  # edge-tts voice name — full list: `edge-tts --list-voices`
+  # Popular options:
+  #   en-US-AriaNeural      ← friendly female, default
+  #   en-US-GuyNeural       ← male voice
+  #   en-GB-SoniaNeural     ← British female
+  #   en-AU-NatashaNeural   ← Australian female
+  voice: "en-US-AriaNeural"
+
+  # Maximum characters of narration script sent to TTS
+  # (animation stories are usually 800-1500 chars; solution text can be longer)
+  max_chars: 3000
+
+  # Seconds to wait for edge-tts to generate the MP3
+  generation_timeout: 60
+
+  # Seconds to wait for ffmpeg to merge audio into the video
+  merge_timeout: 45
+
+# ── Output Paths ──────────────────────────────────────────────────────────────
+# Relative to the project root directory.
+output:
+  animations_dir: "outputs/animations"
+  solutions_dir:  "outputs/solutions"
+
+# ── API Retry (transient errors / rate limits) ────────────────────────────────
+retry:
+  # Total number of attempts (1 initial + N-1 retries)
+  max_attempts: 4
+
+  # Seconds to wait before each retry attempt
+  # Length of this list must equal max_attempts - 1
+  delays: [5, 15, 30, 60]
