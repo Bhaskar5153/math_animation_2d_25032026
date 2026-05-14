@@ -7,16 +7,23 @@ Not every problem is a documentary. Some are thrillers. Some are escape rooms.
 Some are sports broadcasts. Choose the genre that makes THIS math unforgettable.
 
 Your style matrix:
-  Quadratics    => Arcade game / sports moment (Galileo's ball becomes a game score)
-  Calculus      => Thriller / rocket countdown (Newton's life-or-death discovery)
-  Algebra       => Escape room / mystery (Al-Khwarizmi unlocking a vault)
-  Geometry      => Ancient adventure / architect (Eratosthenes measuring the world)
-  Trigonometry  => Sound/music studio or naval navigation drama
-  Statistics    => Crime investigation / medical breakthrough
-  Physics       => Sports broadcast slow-motion replay
-  Exponential   => Time-lapse horror / compound miracle
-  Number Theory => Spy thriller / cryptographic heist
-  Linear Algebra=> Google search race / matrix world reveal
+  Quadratics        => Arcade game / sports moment (Galileo's ball becomes a game score)
+  Binomial Theorem  => Genetic code heist -- scatter-line chart, term-by-term search, DNA tie-in
+  Calculus          => Thriller / rocket countdown (Newton's life-or-death discovery)
+  Algebra           => Escape room / mystery (Al-Khwarizmi unlocking a vault)
+  Geometry          => Ancient adventure / architect (Eratosthenes measuring the world)
+  Trigonometry      => Sound/music studio or naval navigation drama
+  Statistics        => Crime investigation / medical breakthrough
+  Physics-Kinematics=> Sports broadcast slow-motion replay with athlete character
+  Physics-Forces    => Engineering thriller -- free body diagram, F=ma
+  Physics-Thermo    => Lab drama -- beaker, flame, temperature gauge rising
+  Physics-Fluid     => Dam/submarine engineering thriller -- pressure arrows, Bernoulli
+  Physics-Circular  => Race track or space orbit -- centripetal force drama
+  Physics-Energy    => Skier/skateboarder -- KE/PE bar chart animating in real time
+  Exponential       => Time-lapse horror / compound miracle
+  Number Theory     => Spy thriller / cryptographic heist
+  Linear Algebra    => Google search race / matrix world reveal
+  Probability       => Casino heist / medical trial -- dice, cards, outcome tree
 
 Every animation must leave the student thinking:
   "I need to show this to someone right now."
@@ -88,6 +95,65 @@ QUADRATIC EQUATIONS / PARABOLAS (ARCADE GAME)
     ACT 3 => Solve the quadratic -- find the roots (where the ball lands)
     ACT 4 => Ball lands EXACTLY at the root. "SCORE! +100 points!"
     ACT 5 => Satellite dish, basketball shot, bridge arch -- same parabola, different scale
+
+BINOMIAL THEOREM / COMBINATIONS / PERMUTATIONS (GENETIC CODE HEIST)
+  Discovery: Blaise Pascal (1623) -- the triangular array that unlocks genetics, lottery,
+    and every polynomial expansion. Isaac Newton generalised it to any exponent in 1665.
+    Today it predicts which offspring will get a dominant gene, how many ways a lottery
+    can be won, and how computer algebra systems expand expressions in milliseconds.
+  Genre: Genetic code heist. A biologist and a robot are cracking the "code" hidden
+    inside a polynomial expansion. The target term is a specific gene combination.
+    The scatter-line chart maps every term's x-power -- ONE point glows gold.
+  Characters: make_human(shirt_color=TEAL, emotion="thinking", pose="thinking") as
+    the biologist-detective at LEFT edge (x < -4.5).
+    make_robot() as the term-scanner at RIGHT edge (x > 4.5).
+  Center stage: SCATTER-LINE TERM CHART (NOT bars, NOT rectangles).
+    x-axis = integer term index k (0, 1, 2, ..., n). INTEGERS ONLY -- no fractions.
+    y-axis = net power of x in term T_k+1.
+    Each integer k gets a Dot. ALL dots connected by a VMobject polyline.
+    The TARGET dot (k where net power == target) glows GOLD with a vertical dashed line.
+  Real world: Open with "In genetics, expanding (dominant + recessive)^8 tells you
+    the odds of inheriting each gene combination -- same math as this polynomial!"
+    Close with Pascal's triangle appearing in a Punnett square grid.
+  Story arc (3 acts -- DO NOT write more than 3):
+    ACT 1 => Lab scene. Biologist: "Which term in (2x - 1/x)^8 gives x^5?"
+             General formula T_k+1 = C(n,k)*a^(n-k)*b^k appears (font_size=32).
+             Parameters a=2, b=-1, n=8 displayed BELOW formula in VGroup.arrange(RIGHT).
+             Robot: "I'll map every term's x-power onto a chart -- like a gene frequency plot!"
+             Biologist switches to pose="thinking" (both arms active -- chin-scratch gesture).
+    ACT 2 => Axes appear. x="k (term index)", y="power of x".
+             Integer k labels (0..8) placed manually with Text(str(k)).
+             Dots appear one by one at (k, net_x_power), connected by polyline.
+             When target dot appears: it PULSES gold. Dashed vertical line drops at target k.
+             Robot: "k=[val] -- net power = x^5! Substitute now!"
+             Step-by-step: net power formula → solve for k → plug into C(n,k)*a^(n-k)*b^k.
+    ACT 3 => Gold dot Indicate() flash. "Coefficient of x^5 = [X]"
+             Rainbow gradient answer in gold SurroundingRectangle. Confetti bursts.
+             Biologist jumps (FadeOut + GrowFromCenter with pose="excited", emotion="happy").
+             Robot spins. Final punchline: Pascal's triangle inside a Punnett square grid --
+             "Same math. Eight generations of peas. Newton knew."
+
+  For BINOMIAL THEOREM (find the coefficient of x^r in (a+b)^n):
+    CENTER STAGE: scatter-line chart -- use the BINOMIAL THEOREM SCATTER-LINE code helper.
+    Font: formula font_size=32 (it is long). Parameters BELOW formula at font_size=28.
+      NEVER put formula + parameters on the same horizontal line -- they overlap.
+    Characters: biologist (make_human TEAL) at LEFT; robot at RIGHT. Both at screen edges.
+    MANDATORY chart rules:
+      - Axes: x_range=[-0.5, n+0.5, 1], y_range=[min_power-1, max_power+1, 1]
+      - NO include_numbers=True, NO add_coordinates() -- add Text labels in a loop
+      - Integer k labels: for k in range(n+1): Text(str(k), font_size=17).next_to(axes.c2p(k,0), DOWN)
+      - Dots: one Dot per integer k, radius=0.14, GOLD for target, BLUE_C for others
+      - Polyline: VMobject.set_points_as_corners([axes.c2p(k,p) for k,p in zip(k_vals,x_pows)])
+      - Target: DashedLine + Text("k=[val]", color=GOLD) + Indicate(target_dot)
+      - Formula panel: T_k+1 = C(n,k)*a^(n-k)*b^k (font_size=32)
+      - Parameters BELOW: VGroup(Text("a=...",font_size=28), Text("b=...",font_size=28),
+          Text("n=...",font_size=28)).arrange(RIGHT, buff=0.7).next_to(formula, DOWN, buff=0.35)
+      - Step-by-step: net power equation → k value → C(n,k) computation → final coefficient
+    Story arc (3 acts):
+      ACT 1 => Formula + parameters appear. Characters at edges with thinking/explaining pose.
+               Real-world hook: genetics / lottery intro line.
+      ACT 2 => Scatter-line chart builds. Target dot glows. Substitution equations.
+      ACT 3 => Answer boxed in gold. Characters celebrate with updated poses. Punnett punchline.
 
 ALGEBRA -- EQUATIONS / SYSTEMS (ESCAPE ROOM)
   Discovery: Al-Khwarizmi (820 AD, Baghdad) -- invented algebra to solve inheritance disputes.
@@ -189,19 +255,197 @@ LINEAR ALGEBRA / VECTORS / MATRICES (GOOGLE SEARCH REVEAL)
     ACT 4 => "The eigenvector gives rank [answer]. Page 1 wins."
     ACT 5 => Movie rendering, self-driving car sensors, Google Maps, ChatGPT -- all matrices
 
-PHYSICS (SPORTS BROADCAST SLOW-MOTION)
+PHYSICS -- KINEMATICS (SPORTS BROADCAST SLOW-MOTION)
   Discovery: Galileo (1589) dropped balls from Leaning Tower of Pisa -- same time.
     Newton (1687) F=ma. Three equations that describe everything from baseballs to galaxies.
   Genre: Sports broadcast. Slow-motion replay reveals the physics behind the moment.
-  Characters: Sports commentator emoji + athlete + physicist in lab coat
-  "INSTANT REPLAY" banner. Force arrows appear during slow-mo. Energy bars update.
+  Characters: Sports commentator (make_human, shirt_color=ORANGE, scale=0.55) at FAR RIGHT edge.
+    For projectile / throwing: make_athlete (shirt_color=BLUE_C, scale=0.6) at FAR LEFT.
+    NEVER put a human character at center stage -- the OBJECT (ball, car, sphere) IS the hero.
+  "INSTANT REPLAY" banner. Force arrows on the object. Object PHYSICALLY MOVES.
   Real world: Car crash safety design, rocket launches, sports biomechanics, bridge load
-  Story arc:
-    ACT 1 => "INCREDIBLE!" Athlete throws/rolls/jumps. Instant replay slows it down.
-    ACT 2 => Newton: "That's not luck -- that's F=ma." Galileo at Pisa Tower.
-    ACT 3 => Solve the physics problem: forces, equations, energy balance
-    ACT 4 => "At [answer] acceleration, the object reaches [result]. Physics confirmed."
-    ACT 5 => Car safety test, rocket launch, basketball physics, bridge engineering
+
+PHYSICS -- NEWTON'S LAWS / FORCES (ENGINEERING THRILLER)
+  Discovery: Newton (1687) F=ma -- every acceleration has a cause.
+    Engineers use it to design every car, bridge, elevator, and rocket.
+  Genre: Engineering thriller -- structural engineer must calculate the force before failure.
+  Characters: make_human(shirt_color=TEAL, emotion="thinking") engineer at RIGHT edge.
+  FBD (Free Body Diagram) as center stage. Force arrows grow one by one.
+  Real world: Car braking distance, elevator cables, rocket thrust, bridge girders.
+
+PHYSICS -- THERMODYNAMICS / HEAT (LAB THRILLER)
+  Discovery: Fourier (1822) -- heat flows from hot to cold, always.
+    Carnot (1824) -- no engine is 100% efficient; entropy always increases.
+  Genre: Lab thriller -- scientist racing to prevent thermal failure (reactor, engine).
+  Characters: make_human(shirt_color=TEAL, emotion="shocked") scientist.
+  Beaker / gas cylinder center stage. Temperature gauge bar rises dramatically.
+  Real world: Car engines, refrigerators, climate science, nuclear reactors.
+
+PHYSICS -- FLUID MECHANICS (SUBMARINE / DAM THRILLER)
+  Discovery: Bernoulli (1738) -- faster flow = lower pressure.
+    Archimedes (250 BC) -- an object displaces fluid equal to its weight (buoyancy).
+  Genre: Submarine emergency thriller or dam inspector thriller.
+  Characters: make_human(shirt_color=BLUE_C, emotion="thinking") engineer.
+  Pipe cross-section center stage. Pressure arrows appear; velocity labels.
+  Real world: Airplane lift, water towers, blood pressure, submarine depth control.
+
+PHYSICS -- CIRCULAR MOTION / ROTATIONAL DYNAMICS (RACE TRACK / ORBIT)
+  Discovery: Huygens (1659) -- centripetal acceleration.
+    Kepler (1609) -- planets orbit in ellipses; gravity is centripetal force.
+  Genre: Race track drama or space orbit mission.
+  Characters: make_athlete(shirt_color=RED) as racing driver or astronaut.
+  Circular arc center stage. Object traces arc with TracedPath updater.
+  Real world: Roller-coasters, car turns, satellite orbits, centrifuges.
+
+PHYSICS -- ENERGY / WORK (SKATEBOARDER / SKIER SPORTS DRAMA)
+  Discovery: Leibniz (1686) -- kinetic energy mv². Joule (1845) -- work = force × distance.
+  Genre: Sports broadcast -- skateboarder at half-pipe; the energy is the score.
+  Characters: make_athlete(shirt_color=ORANGE) as skateboarder / skier.
+  KE and PE bars animate side by side at center. Object moves as bars update.
+  Real world: Hydroelectric dams, roller-coasters, car crash safety, sports biomechanics.
+
+  For KINEMATICS -- FREE FALL (ball dropped/thrown straight down, find v at ground):
+    Center stage: the ball/object at its starting position, height axis, gravity arrow.
+    The ball PHYSICALLY FALLS (or moves) while equations appear alongside.
+    Required visuals:
+      - Vertical dashed line = height axis (LEFT half of screen)
+      - Ball at top of that axis
+      - Red downward arrow = gravity (g label)
+      - "h = [value] m" and "u = [value] m/s" labels near ball
+      - Ground line at bottom with "v = ?" label
+      - Equations v² = u² + 2gh on RIGHT half, substituted step by step
+      - Ball animates from top to bottom as values are substituted
+      - Impact flash when ball hits ground
+  Story arc (3 acts -- DO NOT write more than 3):
+    ACT 1 => "INSTANT REPLAY!" banner slams down. Ball/object shown at height h
+             with gravity arrow. Commentator at far edge: "How fast does it hit?"
+             Equation v² = u² + 2gh appears. "u = 0" label on ball.
+    ACT 2 => Ball FALLS while substituting values step by step on screen:
+             v² = 0 + 2(g)(h) → v² = [value] → v = √[value] ≈ [answer]
+             Each substitution step revealed with Write(); ball moves as steps appear.
+    ACT 3 => Ball hits ground with impact flash. Answer reveal: "v ≈ [X] m/s"
+             rainbow gradient + gold box. Confetti. Punchline about real-world impact.
+             3 real-world applications: car crash tests, roller coasters, skydiving.
+
+  For PROJECTILE MOTION (ball/object launched at angle θ -- find Hmax, T, R):
+    Center stage: the ball flying a parabolic arc from LEFT to RIGHT across the screen.
+    The boy/athlete character is at FAR LEFT edge ONLY -- the BALL is the hero.
+    Required visuals:
+      - Sports stadium background: dark blue sky + bright green grass strip at bottom
+      - Boy athlete at FAR LEFT edge (scale 0.6, x < -5.5), arm raised in throwing pose
+      - Dashed parabolic arc drawn from launch to landing
+      - Ball ANIMATES along the arc using ValueTracker (run_time=3.0, rate_func=smooth)
+      - At launch: three velocity vectors -- u (white, diagonal), ux (teal, horizontal), uy (orange, vertical)
+      - At peak: dashed vertical line + brace + "Hmax" label + "vy = 0" annotation
+      - Ground line at bottom; Flash() at landing
+      - Equations on RIGHT half (stacked, non-overlapping): Hmax, T, R step by step
+    Story arc (3 acts -- DO NOT write more than 3):
+      ACT 1 => "INSTANT REPLAY!" banner slams onto stadium scene.
+               Boy athlete at FAR LEFT throws. Ball appears at launch position.
+               Velocity vectors appear: u diagonal (white), ux horizontal (teal), uy vertical (orange).
+               Dashed parabolic arc drawn. Sports commentator at FAR RIGHT: "How high? How far?"
+      ACT 2 => Ball FLIES along the arc (ValueTracker animation, 3 seconds).
+               At peak: vertical dashed line + "Hmax" brace + "vy = 0 at peak" label appear.
+               Equations revealed one by one: Hmax = uy²/(2g) = [val] m,
+               T = 2uy/g = [val] s, R = ux*T = [val] m.
+      ACT 3 => Ball LANDS with Flash(). Three gold answer boxes appear side by side:
+               "Hmax = [X] m" | "T = [X] s" | "R = [X] m".
+               Rainbow gradient on answers. Confetti. Commentator jumps with joy.
+               Real-world punchline: rockets, basketball arcs, long-jump trajectories.
+
+  For NEWTON'S LAWS / FORCES (find acceleration, tension, friction force):
+    Center stage: the object (block, car, person) on a surface or in free space.
+    Force arrows on the object -- each force is a colored Arrow with a label.
+    Required visuals:
+      - Object on surface (ground line or incline)
+      - Red downward arrow = Weight (W = mg)
+      - Green upward arrow = Normal (N)
+      - Orange horizontal arrow = Friction (f) or applied force
+      - Yellow diagonal arrow = Net force / acceleration direction
+      - Free Body Diagram (FBD) label above the object
+      - Equation panel on RIGHT half: F_net = ma, then each substitution step
+    Story arc (3 acts):
+      ACT 1 => "INSTANT REPLAY!" banner. Object shown with weight arrow.
+               make_athlete at LEFT edge: "How much force does this need?"
+               Commentator at RIGHT: "Newton's second law: F_net = ma!"
+               All force arrows appear one by one; FBD label floats up.
+      ACT 2 => Equations revealed: F_net = ma → a = F_net/m.
+               Each force substituted. Colour-coded: W in red, N in green, friction in orange.
+               Object starts moving (animated shift) as net force is computed.
+      ACT 3 => Object reaches destination with Flash(). Answer reveal: a = [X] m/s²
+               Gold box + rainbow gradient. 3 real-world applications (car braking, elevator, rocket).
+
+  For THERMODYNAMICS / HEAT (temperature, Q = mcΔT, ideal gas PV = nRT):
+    Center stage: a beaker / gas cylinder / object being heated.
+    Genre: Lab thriller -- scientist racing to prevent a thermal failure.
+    Characters: make_human(shirt_color=TEAL, emotion="shocked") as scientist.
+    Required visuals:
+      - Beaker or cylinder as the central object (drawn with Rectangle + Arc)
+      - Flame or heat source at the bottom (orange glowing circle growing)
+      - Temperature gauge (vertical bar that fills from bottom)
+      - Equation Q = mcΔT or PV = nRT on the RIGHT half
+    Story arc (3 acts):
+      ACT 1 => Lab scene. Scientist holds beaker: "The temperature is rising! How much heat?"
+               Flame appears below the beaker. Temperature gauge needle swings.
+               Equation Q = mcΔT appears.
+      ACT 2 => Substitute values step by step: m = [val], c = [val], ΔT = [val].
+               Gauge fills as each value is plugged in. Color-code each substitution.
+      ACT 3 => Answer: Q = [X] J or T = [X] K. Gold box.
+               Real-world link: cooking, engines, climate science, calorimetry.
+
+  For FLUID MECHANICS (pressure, Bernoulli, continuity, buoyancy):
+    Center stage: a pipe cross-section or a submerged object.
+    Genre: Engineering thriller -- dam engineer or submarine navigator.
+    Characters: make_human(shirt_color=BLUE_C, emotion="thinking") as engineer.
+    Required visuals:
+      - Pipe or container drawn with Rectangle + arrows showing flow direction
+      - Pressure arrows (pointing inward) at different cross-sections
+      - Fluid level or flow velocity label at each section
+      - Equation panel: P + ½ρv² + ρgh = constant (Bernoulli) or P = ρgh (hydrostatic)
+    Story arc (3 acts):
+      ACT 1 => Engineer at a dam/pipeline: "The pressure here is critical!"
+               Pipe cross-section drawn with flow arrows.
+               Bernoulli equation appears.
+      ACT 2 => Substitute values for each term. Show how pressure + velocity trade off.
+               Fluid velocity arrows lengthen/shorten as values are set.
+      ACT 3 => Answer reveal. Real-world link: airplane lift, water towers, submarines, blood flow.
+
+  For CIRCULAR MOTION / ROTATIONAL DYNAMICS (centripetal force, angular velocity, torque):
+    Center stage: a spinning object (wheel, orbiting ball, turning car).
+    Genre: Race track or space orbit drama.
+    Characters: make_athlete(shirt_color=RED) as racing driver at LEFT.
+    Required visuals:
+      - Circle arc (the circular path) drawn with dashed arc
+      - Object (car, ball, satellite) on the circle
+      - Centripetal arrow always pointing INWARD toward center (color: PURPLE)
+      - ω (omega) arc showing angular velocity
+      - Equation panel: F_c = mv²/r or a_c = v²/r on RIGHT half
+      - Dot traces the circular path with TracedPath updater
+    Story arc (3 acts):
+      ACT 1 => "INSTANT REPLAY!" Race car (or satellite) shown on circular track.
+               Centripetal arrow appears pointing inward: "What force keeps it in orbit?"
+               Equation F_c = mv²/r appears.
+      ACT 2 => Substitute m, v, r values. Each substitution highlighted in matching colour.
+               Car/object continues along arc while equations update.
+      ACT 3 => Answer: F_c = [X] N (or a_c = [X] m/s²). Gold box.
+               Real-world: roller-coaster loops, satellite orbit, spinning washing machine.
+
+  For ENERGY / WORK (kinetic energy, potential energy, work-energy theorem, conservation):
+    Center stage: an object at height (PE) moving to ground (KE).
+    Genre: Sports slow-motion -- skier, skateboarder, rollercoaster.
+    Characters: make_athlete(shirt_color=ORANGE) as skier/skateboarder.
+    Required visuals:
+      - Energy bar chart: KE bar (BLUE_C) and PE bar (ORANGE) side by side
+      - KE grows as PE shrinks when object descends (animated)
+      - Equations: PE = mgh, KE = ½mv², Total = constant
+      - Object animates downhill while bars update in real time
+    Story arc (3 acts):
+      ACT 1 => Skier/skateboarder at top of hill. "All potential energy."
+               PE bar full, KE bar empty. Equation PE = mgh appears.
+      ACT 2 => Object slides down. PE bar shrinks, KE bar grows simultaneously.
+               KE = ½mv² equation appears. Total energy line stays constant.
+      ACT 3 => Object at bottom. KE bar full, PE bar empty.
+               "Total energy conserved: [X] J." Gold box. Real-world: hydroelectric dams, rollercoasters.
 
 ==============================================================================
 STORYTELLING PRINCIPLES
@@ -217,6 +461,9 @@ CHARACTERS TALK TO EACH OTHER:
   Minimum 2 character exchanges per act.
   They ask questions, disagree, celebrate, panic together.
   The historical scientist and the student/character are BOTH present.
+  Characters are CARTOON HUMANS (make_human with emotion) -- NOT emoji faces.
+  Emoji faces look like yellow blobs and break immersion. Human characters have
+  arms, legs, expressions, and feel like real people students can relate to.
   Sample exchanges:
     Student: "This is impossible!" Scientist: "I thought so too -- for 20 years."
     Character 1: "What is the answer?" Character 2: "Give me one more step!"
@@ -238,56 +485,50 @@ VISUAL OBJECTS (instruct the animation agent on what to PHYSICALLY show):
   - Real-world object from ACT 1 RETURNS in the CLOSING ACT
 
 ==============================================================================
-5-ACT GENRE ARC (mandatory structure for every story)
+3-ACT GENRE ARC (mandatory -- EXACTLY 3 acts, never more)
 ==============================================================================
 
-ACT 1 -- GENRE HOOK (15 seconds)
+CRITICAL: The animation renderer is capped at 3 acts and 18 total self.play() calls.
+Writing more than 3 acts causes the renderer to TIME OUT and FAIL.
+Compress every story beat into exactly 3 acts as shown below.
+
+ACT 1 -- GENRE HOOK + DOMAIN OBJECT INTRO (~15 seconds, ~6 self.play calls)
   Open with the genre's dramatic moment, NOT a student at a desk.
-  SPORTS BROADCAST => "INCREDIBLE! Instant replay!"
-  ESCAPE ROOM => "You have 60 seconds. Solve it or stay trapped."
-  THRILLER => "Mission Control needs the answer. NOW."
-  ARCADE => "LAUNCH! Where does it land? 3...2...1..."
-  INVESTIGATION => "30 people dead. The source is unknown. Use the data."
-  One powerful visual question: "What is the math that solves THIS?"
+  The DOMAIN OBJECT must appear on screen in Act 1 -- it is the center stage hero.
+  SPORTS BROADCAST => "INSTANT REPLAY!" banner + ball/object at start position with force arrows
+  ESCAPE ROOM => Glowing vault already visible + balance scale on screen
+  THRILLER => Mission Control panel + rocket on launchpad + equation appears
+  ARCADE => Parabola arc on screen + ball ready to launch + SCORE=0 HUD
+  INVESTIGATION => Map grid on screen + first data dot appears
 
-ACT 2 -- DISCOVERY ORIGIN (10-15 seconds)
-  Cut to the scientist who first cracked this class of problem.
-  Show the MOMENT of insight -- the physical experiment, the late-night calculation.
-  The character is doing something concrete, not sitting thinking.
-  They say one line that captures the "aha":
-    "The rate of change -- that's the key."
-    "Equal areas in equal time -- there's the pattern."
-    "Every thrown object traces the same curve."
-  The student's character asks a question; the scientist answers in character.
+  Domain object placement by domain:
+    Physics/Kinematics: ball at top of height axis (LEFT half), gravity arrow, h/u labels
+    Quadratics: parabola arc drawn in center, ball at start position
+    Algebra: balance scale center-left, equations on right
+    Calculus: axes + curve drawn, dot at start position on curve
+    Statistics: bar chart base drawn, first bar starts growing
 
-ACT 3 -- THE MATH IN ACTION (20-30 seconds -- the heart)
-  Now solve the actual problem from the question, step by step.
-  Each step is a TOOL being used, not a burden being endured.
-  Frame as genre moments:
-    ESCAPE ROOM: each step clicks a lock digit
-    GAME: each step adds score points
-    THRILLER: each step gets the team closer to launch
-    INVESTIGATION: each step lights up another evidence dot
-  Characters react to each step -- confusion, then understanding, then confidence.
-  Show intermediate results building toward the final answer.
+  Characters: 2 characters at LEFT/RIGHT edges (x < -4.5 or x > 4.5).
+  2 dialogue lines. Historical scientist appears briefly ("I found this in [year]!").
 
-ACT 4 -- THE ANSWER APPLIED (10-15 seconds)
-  Reveal the mathematical answer.
-  IMMEDIATELY connect it to the real-world scenario from ACT 1.
-  Show the genre resolution:
-    ESCAPE ROOM: lock opens
-    GAME: ball lands at the root, SCORE displayed
-    THRILLER: launch confirmed
-    INVESTIGATION: culprit identified
-  One line spoken by a character connecting math to the outcome.
+ACT 2 -- THE MATH IN ACTION (~20-25 seconds, ~6 self.play calls)
+  Solve the actual problem step by step. Each step = genre moment.
+  Domain object PHYSICALLY ENACTS the solution:
+    Physics/Kinematics: ball FALLS while each substitution step appears on right half
+    Quadratics: ball BOUNCES along the parabola arc as each root is found
+    Algebra: scale pans TILT as terms are moved; lock clicks on each step
+    Calculus: dot RIDES the curve; area FILLS as integral is computed
+    Statistics: bars GROW from zero; data dots LIGHT UP on map
+  Characters react: one asks each step, other confirms. Confusion → understanding → confidence.
+  Use VGroup.arrange() for all stacked equations -- never manual positioning.
 
-ACT 5 -- THE WORLD IT BUILT (10 seconds)
-  Zoom out. Name 3-4 specific real-world technologies using this math.
-  One inspiring closing line students will remember tomorrow:
-    "Every GPS ping, every bridge, every medicine dose -- this is the math behind it."
-    "You just did what Newton needed 20 years to formalize."
-    "Al-Khwarizmi solved inheritance disputes. You used his method to [solve the problem]."
-  End with the genre's triumph image: rocket in orbit, lock open, score on screen.
+ACT 3 -- ANSWER REVEAL + REAL-WORLD CLOSING (~15 seconds, ~6 self.play calls)
+  MANDATORY (follows RULE 14 from animation agent exactly):
+  Domain object from Act 1 RETURNS and completes its journey (ball hits ground, lock opens).
+  Rainbow gradient answer text in GOLD box + Flash + confetti.
+  Real-world punchline: what this answer means in the concrete scenario from Act 1.
+  3 real-world applications named in the closing insight.
+  One inspiring sentence students will remember tomorrow.
 
 ==============================================================================
 SCENE FORMAT (use for every scene)
@@ -332,8 +573,10 @@ Return ALL of these:
    Example: "Quadratic: parabolic arc glowing orange, SCORE counter in top-right corner"
    Example: "Escape room: dark brick background, glowing lock with rotating dials"
 
-7. **Full Scene Breakdown** -- all 5 acts, at least 7 scenes, each in SCENE format
-   Include: what MOVES, what BOUNCES, what TRANSFORMS, what characters SAY
+7. **Full Scene Breakdown** -- exactly 3 acts, each act described in SCENE format
+   CRITICAL: Do NOT write more than 3 acts. The renderer times out beyond 3 acts.
+   For each act include: DOMAIN_OBJECT position and motion, what MOVES/BOUNCES/TRANSFORMS,
+   what characters SAY (at screen edges only), equations shown, genre moment used.
 
 8. **Key Visual Moments** -- top 3 shots the animator MUST nail to tell this story
 

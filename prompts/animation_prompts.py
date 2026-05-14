@@ -22,16 +22,25 @@ ABSOLUTE RULE 0: NO LaTeX EVER
 LaTeX is NOT installed. NEVER use MathTex(...) or Tex(...)
 ALWAYS use  Text("...", font_size=...)  with Unicode math symbols:
 
-  Superscripts : squared=\\u00b2  cubed=\\u00b3  n=\\u207f  -1=\\u207b\\u00b9
-  Subscripts   : 0=\\u2080  1=\\u2081  2=\\u2082  n=\\u2099
-  Greek        : alpha=\\u03b1  beta=\\u03b2  gamma=\\u03b3  delta=\\u03b4
-                 theta=\\u03b8  lambda=\\u03bb  mu=\\u03bc  pi=\\u03c0
-                 sigma=\\u03c3  omega=\\u03c9  phi=\\u03c6
-  Calculus     : integral=\\u222b  sum=\\u2211  partial=\\u2202  nabla=\\u2207
-                 infinity=\\u221e  sqrt=\\u221a
-  Relations    : leq=\\u2264  geq=\\u2265  neq=\\u2260  approx=\\u2248
-  Arrows       : right=\\u2192  left=\\u2190  implies=\\u27f9
-  Ticks        : check=\\u2713  cross=\\u2717  star=\\u2605
+  Superscripts : squared=² (\\u00b2)  cubed=³ (\\u00b3)   ← ONLY THESE TWO WORK
+                 For other powers write: ^4  ^n  ^-1  (plain text, e.g. "x^4")
+  Subscripts   : NEVER use Unicode subscript characters (₀₁₂ₙᵢₓ etc.)
+                 They are NOT in Manim's font and render as COLORED BOXES.
+                 Instead write subscripts inline: "a_c"  "v_0"  "F_net"  "u_x"
+                 Example: Text("a_c = 8 m/s²")   NOT   Text("a⁣ = 8 m/s²")
+  Greek        : alpha=α  beta=β  gamma=γ  delta=δ  theta=θ  lambda=λ
+                 mu=μ  pi=π  sigma=σ  omega=ω  phi=φ
+  Calculus     : integral=∫  sum=∑  partial=∂  infinity=∞  sqrt=√
+  Relations    : leq=≤  geq=≥  neq=≠  approx=≈
+  Arrows       : right=→  left=←  implies=⟹
+
+SUBSCRIPT RULE (CRITICAL -- violations produce colored boxes on screen):
+  FORBIDDEN: Text("a₀")  Text("v₁")  Text("Fₙ")  (subscript Unicode)
+  FORBIDDEN: creating a separate small Text object in a colored SurroundingRectangle
+             to simulate a subscript -- this produces the ORANGE/RED BOX artifact.
+  CORRECT:   Text("a_c = 8 m/s²")   -- underscore in the same string, same font size
+  CORRECT:   Text("v_0 = 20 m/s")   -- subscript written as plain underscore notation
+  CORRECT:   Text("F_net = ma")      -- subscript word after underscore
 
 ALSO FORBIDDEN:
   NumberLine(include_numbers=True)  -- uses MathTex for labels
@@ -69,7 +78,12 @@ Statistics      | Crime investigation    | Data dots light up on map
 Linear Algebra  | Google/Matrix world    | Grid transforming, vectors flying
 Exponential     | Time-lapse growth      | Bacteria/cells multiplying
 Number Theory   | Cryptography vault     | Prime lock clicking open
-Physics         | Sports broadcast       | Object moves + force-replay HUD
+Physics         | Sports broadcast       | "INSTANT REPLAY" HUD banner
+                |                        | Free Fall: ball FALLS top-to-bottom on height axis
+                |                        | Projectile: dashed parabola arc, boy at FAR LEFT,
+                |                        |   stadium background, ball flies via ValueTracker
+                |                        | Forces: gravity arrow (RED) on object
+                |                        | Inclined: sphere rolls down slope
 
 Genre elements to MIX freely:
   - Puzzle unlock: equation steps open a combination lock
@@ -144,6 +158,67 @@ area = axes.get_area(curve, x_range=[0, 2], color=[BLUE, TEAL], opacity=0.4)
 self.play(FadeIn(area), run_time=1.5)
 ```
 
+### BINOMIAL THEOREM -- SCATTER-LINE TERM CHART (mandatory pattern)
+CRITICAL RULES:
+- x-axis = integer k values 0,1,...,n ONLY. NO fractional ticks. NO include_numbers.
+- Add Text labels for every integer k using a loop (see code below).
+- Use Dot + VMobject polyline (scatter-line), NOT bars/Rectangles.
+- Target term (k where net x-power == target): gold Dot + gold dashed vertical line.
+```python
+# --- compute net x-power for each k in (a*x^p + b*x^q)^n ---
+# Example: (2x - 1/x)^8 => p=1, q=-1, n=8, target_power=5
+n_val = 8; a_pow = 1; b_pow = -1; target_power = 5
+k_vals  = list(range(n_val + 1))
+x_pows  = [a_pow*(n_val - k) + b_pow*k for k in k_vals]
+target_k = next(k for k, p in zip(k_vals, x_pows) if p == target_power)
+
+# --- axes: NO include_numbers, NO add_coordinates ---
+axes = Axes(
+    x_range=[-0.5, n_val + 0.5, 1],
+    y_range=[min(x_pows) - 1, max(x_pows) + 1, 1],
+    x_length=8, y_length=5,
+    axis_config={"color": GRAY_A, "stroke_width": 2, "include_ticks": False},
+).shift(DOWN*0.2)
+x_lbl = Text("k (term index)", font_size=22, color=GRAY_A).next_to(
+    axes.x_axis.get_right(), RIGHT, buff=0.12)
+y_lbl = Text("power of x", font_size=22, color=GRAY_A).rotate(PI/2).next_to(
+    axes.y_axis.get_top(), UP, buff=0.12)
+# Integer k labels on x-axis
+k_labels = VGroup(*[
+    Text(str(k), font_size=17, color=GRAY_A).next_to(axes.c2p(k, 0), DOWN, buff=0.15)
+    for k in k_vals
+])
+# Integer power labels on y-axis
+y_labels = VGroup(*[
+    Text(str(p), font_size=17, color=GRAY_A).next_to(axes.c2p(0, p), LEFT, buff=0.15)
+    for p in sorted(set(x_pows))
+])
+
+# --- scatter-line: dots + connecting polyline ---
+dot_pts = [axes.c2p(k, p) for k, p in zip(k_vals, x_pows)]
+line_path = VMobject(color=BLUE_B, stroke_width=2.5)
+line_path.set_points_as_corners(dot_pts)
+dots = VGroup(*[
+    Dot(axes.c2p(k, p), radius=0.14,
+        color=GOLD if k == target_k else BLUE_C, fill_opacity=1)
+    for k, p in zip(k_vals, x_pows)
+])
+
+# --- target highlight ---
+v_line = DashedLine(
+    axes.c2p(target_k, min(x_pows) - 0.5), axes.c2p(target_k, target_power),
+    color=GOLD, stroke_width=2.5)
+k_tag = Text(f"k={target_k}", font_size=20, color=GOLD).next_to(
+    axes.c2p(target_k, 0), DOWN, buff=0.38)
+
+self.play(Create(axes), Write(x_lbl), Write(y_lbl),
+          FadeIn(k_labels), FadeIn(y_labels))
+self.play(Create(line_path), run_time=1.8)
+self.play(LaggedStart(*[GrowFromCenter(d) for d in dots], lag_ratio=0.12), run_time=1.5)
+self.play(Create(v_line), Indicate(dots[target_k], scale_factor=1.7, color=GOLD))
+self.play(Write(k_tag))
+```
+
 ### QUADRATIC -- BOUNCING BALL ARC
 ```python
 # Ball follows parabolic arc -- use ValueTracker for interactive feel
@@ -177,7 +252,7 @@ def start_float(self, obj, amplitude=0.12, speed=1.0):
     obj.add_updater(updater)
     return obj
 # Usage:
-# mascot = self.make_emoji("happy").to_edge(RIGHT)
+# mascot = self.make_human(shirt_color=TEAL, scale=0.8, emotion="happy").to_edge(RIGHT)
 # self.add(mascot); self.start_float(mascot)
 ```
 
@@ -367,6 +442,194 @@ def make_energy_bars(self, ke_trans_h, ke_rot_h, pe_h, x_offset=0):
     return VGroup(bar_kt, bar_kr, bar_pe, lbl_kt, lbl_kr, lbl_pe)
 ```
 
+### PHYSICS -- VERTICAL FREE FALL (ball/object dropping straight down under gravity)
+```python
+# Use for: "object falls from height h, find v at ground", "find time to reach ground"
+# Replace h_m, g_m, u_m with actual values from the problem.
+import math as _math
+
+h_m = 20.0   # height in metres (from problem)
+g_m = 9.8    # gravity acceleration (from problem; may be 10.0)
+u_m = 0.0    # initial velocity (0 = dropped from rest; from problem)
+
+# -- Layout: LEFT half = physical scene, RIGHT half = equation panel --
+
+# Ground line across full width
+ground_line = Line(LEFT*5.5, RIGHT*5.5, color=GREEN_C, stroke_width=4).shift(DOWN*2.5)
+ground_lbl  = Text("Ground", font_size=22, color=GREEN_C).shift(LEFT*2.5 + DOWN*2.85)
+
+# Vertical dashed height axis on LEFT half
+height_axis = DashedLine(DOWN*2.5, UP*2.5,
+                         color=GRAY_A, stroke_width=2, dash_length=0.18).shift(LEFT*2.8)
+
+# Height brace arrow (double-headed) on the side
+h_brace = DoubleArrow(LEFT*3.3 + DOWN*2.5, LEFT*3.3 + UP*2.5,
+                      color=YELLOW, buff=0, stroke_width=3,
+                      tip_length=0.18, max_tip_length_to_length_ratio=0.08)
+h_lbl   = Text("h = " + str(int(h_m)) + " m", font_size=28, color=YELLOW)
+h_lbl.next_to(h_brace, LEFT, buff=0.15)
+
+# Ball at top of height axis
+ball = Circle(radius=0.3, color=BLUE_C, fill_color=BLUE_C, fill_opacity=1)
+ball.move_to(LEFT*2.8 + UP*2.5)
+mass_lbl = Text("m = 2 kg", font_size=22, color=WHITE).next_to(ball, RIGHT, buff=0.18)
+u_lbl    = Text("u = " + str(int(u_m)) + " m/s", font_size=20, color=GRAY_A)
+u_lbl.next_to(ball, UP, buff=0.14)
+
+# Gravity arrow -- starts at ball position, points DOWN
+g_arrow = Arrow(ball.get_center(), ball.get_center() + DOWN*1.1,
+                color=RED, buff=0, stroke_width=5, max_tip_length_to_length_ratio=0.22)
+g_lbl   = Text("g = " + str(g_m) + " m/s²", font_size=22, color=RED)
+g_lbl.next_to(g_arrow, RIGHT, buff=0.15)
+
+# -- Build the scene --
+self.play(Create(ground_line), Write(ground_lbl))
+self.play(Create(height_axis), GrowArrow(h_brace), Write(h_lbl))
+self.play(GrowFromCenter(ball), Write(mass_lbl), Write(u_lbl))
+self.play(GrowArrow(g_arrow), Write(g_lbl))
+
+# -- Ball falls (animate from start to ground) --
+# Gravity arrow and labels shift with the ball:
+fall_dist = UP*2.5 - DOWN*2.5  # vector from start to end is DOWN*5
+self.play(
+    ball.animate.move_to(LEFT*2.8 + DOWN*2.5),
+    g_arrow.animate.shift(DOWN*5),
+    mass_lbl.animate.shift(DOWN*5),
+    u_lbl.animate.shift(DOWN*5),
+    g_lbl.animate.shift(DOWN*5),
+    run_time=2.5, rate_func=smooth,
+)
+# Impact flash
+self.play(Flash(ball, color=YELLOW, flash_radius=0.7, line_length=0.3))
+```
+
+### PHYSICS -- PROJECTILE MOTION (ball launched at angle, parabolic arc LEFT→RIGHT)
+```python
+# Use for: "ball projected at angle θ, find max height / time of flight / range"
+# Layout: stadium background; boy at FAR LEFT edge; ball arcs across; equations on screen.
+import math as _math
+
+# Problem parameters -- replace with actual values from the problem
+u_ms      = 20.0          # initial speed m/s
+theta_deg = 30.0          # launch angle degrees
+g_ms2     = 9.8           # gravitational acceleration m/s²
+
+theta = _math.radians(theta_deg)
+ux    = u_ms * _math.cos(theta)            # horizontal component (17.32 m/s)
+uy    = u_ms * _math.sin(theta)            # vertical component   (10.0 m/s)
+T_fl  = 2 * uy / g_ms2                    # time of flight        (2.04 s)
+R_m   = ux * T_fl                          # horizontal range      (35.35 m)
+Hmax  = uy**2 / (2 * g_ms2)               # maximum height        (5.10 m)
+
+# -- Screen coordinate mapping --
+# Launch at FAR LEFT, land at FAR RIGHT; peak maps to top of usable screen.
+x_launch = -5.5;  x_land = 5.5
+y_ground  = -2.0; y_peak = 2.8
+sx = (x_land - x_launch) / R_m
+sy = (y_peak - y_ground) / Hmax
+
+def proj_pt(t_phys):
+    xp = ux * t_phys
+    yp = uy * t_phys - 0.5 * g_ms2 * t_phys**2
+    return np.array([x_launch + xp * sx, y_ground + yp * sy, 0])
+
+launch_pt = proj_pt(0)
+peak_t    = uy / g_ms2
+peak_pt   = proj_pt(peak_t)
+land_pt   = proj_pt(T_fl)
+
+# -- Stadium background --
+sky   = Rectangle(width=16, height=5.5, fill_color="#1a3a5c", fill_opacity=1, stroke_width=0)
+sky.shift(UP*1.25)
+grass = Rectangle(width=16, height=2.0, fill_color="#2a6e2a", fill_opacity=1, stroke_width=0)
+grass.shift(DOWN*3.0)
+ground_line = Line(LEFT*7, RIGHT*7, color=GREEN_E, stroke_width=3).move_to(np.array([0, y_ground, 0]))
+self.add(sky, grass, ground_line)
+
+# -- Angle arc at launch --
+angle_arc = Arc(radius=0.55, start_angle=0, angle=theta, color=YELLOW, stroke_width=2,
+                arc_center=launch_pt)
+angle_lbl = Text(str(int(theta_deg)) + "°", font_size=18, color=YELLOW)
+angle_lbl.move_to(launch_pt + RIGHT*0.72 + UP*0.22)
+
+# -- Dashed parabolic arc --
+arc_curve = ParametricFunction(
+    lambda s: proj_pt(s * T_fl),
+    t_range=[0, 1, 0.008],
+    color=YELLOW, stroke_width=2.5,
+).set_stroke(dash_lengths=[0.12, 0.06])
+
+# -- Ball (the HERO of the animation) --
+ball = Circle(radius=0.22, color=RED, fill_color="#cc2200", fill_opacity=1)
+ball.move_to(launch_pt)
+
+# -- Animate ball along arc with ValueTracker --
+t_trk = ValueTracker(0.0)
+ball.add_updater(lambda m: m.move_to(proj_pt(t_trk.get_value() * T_fl)))
+self.add(ball)
+self.play(
+    Create(arc_curve),
+    t_trk.animate.set_value(1.0),
+    run_time=3.0, rate_func=smooth,
+)
+ball.clear_updaters()
+self.play(Flash(ball, color=YELLOW, flash_radius=0.55, line_length=0.22))  # landing impact
+
+# -- Velocity vectors at launch point --
+tip_u  = launch_pt + np.array([ux, uy, 0]) * sx * 0.7
+tip_ux = launch_pt + np.array([ux, 0,  0]) * sx * 0.7
+tip_uy = tip_ux    + np.array([0,  uy, 0]) * sy * 0.7
+vec_u  = Arrow(launch_pt, tip_u,  color=WHITE,  buff=0, stroke_width=4,
+               max_tip_length_to_length_ratio=0.18)
+vec_ux = Arrow(launch_pt, tip_ux, color=TEAL,   buff=0, stroke_width=4,
+               max_tip_length_to_length_ratio=0.18)
+vec_uy = Arrow(tip_ux,    tip_uy, color=ORANGE, buff=0, stroke_width=4,
+               max_tip_length_to_length_ratio=0.18)
+lbl_u  = Text("u=" + str(int(u_ms)) + "m/s",       font_size=18, color=WHITE ).next_to(vec_u,  UL, buff=0.08)
+lbl_ux = Text("ux=" + "{:.2f}".format(ux) + "m/s", font_size=16, color=TEAL  ).next_to(vec_ux, DOWN, buff=0.08)
+lbl_uy = Text("uy=" + str(int(uy)) + "m/s",        font_size=16, color=ORANGE).next_to(vec_uy, RIGHT, buff=0.08)
+
+# -- Peak height marker --
+peak_dashed = DashedLine(np.array([peak_pt[0], y_ground, 0]), peak_pt,
+                         color=WHITE, stroke_width=2, dash_length=0.14)
+hmax_lbl    = Text("Hmax", font_size=20, color=YELLOW)
+hmax_lbl.next_to(peak_pt, UP, buff=0.1)
+vy0_lbl     = Text("vy=0 here", font_size=18, color=TEAL)
+vy0_lbl.next_to(peak_pt, RIGHT, buff=0.18)
+
+# -- Three answer boxes (side by side, bottom of screen) --
+ans_hmax = Text("Hmax = " + "{:.2f}".format(Hmax) + " m",  font_size=26, color=GREEN_C)
+ans_T    = Text("T = "    + "{:.2f}".format(T_fl)  + " s",  font_size=26, color=TEAL)
+ans_R    = Text("R = "    + "{:.2f}".format(R_m)   + " m",  font_size=26, color=ORANGE)
+ans_row  = VGroup(ans_hmax, ans_T, ans_R).arrange(RIGHT, buff=0.5)
+ans_row.move_to(DOWN*1.2)
+box_hmax = SurroundingRectangle(ans_hmax, color=GOLD, corner_radius=0.1, buff=0.12)
+box_T    = SurroundingRectangle(ans_T,    color=GOLD, corner_radius=0.1, buff=0.12)
+box_R    = SurroundingRectangle(ans_R,    color=GOLD, corner_radius=0.1, buff=0.12)
+self.play(
+    LaggedStart(
+        AnimationGroup(FadeIn(ans_hmax), Create(box_hmax)),
+        AnimationGroup(FadeIn(ans_T),    Create(box_T)),
+        AnimationGroup(FadeIn(ans_R),    Create(box_R)),
+        lag_ratio=0.35,
+    ), run_time=1.5
+)
+```
+
+### PHYSICS -- SPORTS BROADCAST HUD (always add for physics problems)
+```python
+# "INSTANT REPLAY" banner -- slam it down from above the frame
+replay_banner = Text("INSTANT REPLAY", font_size=36, color=WHITE, weight="BOLD")
+replay_banner.set_color_by_gradient(ORANGE, YELLOW)
+replay_bg = SurroundingRectangle(replay_banner, color=ORANGE,
+                                  fill_color=ORANGE, fill_opacity=0.9,
+                                  buff=0.2, corner_radius=0.1)
+replay_group = VGroup(replay_bg, replay_banner).to_edge(UP).shift(UP*3)
+self.play(replay_group.animate.to_edge(UP), rate_func=ease_out_bounce, run_time=0.8)
+self.wait(0.4)
+self.play(FadeOut(replay_group))
+```
+
 ### 3D GEOMETRY (ISOMETRIC PROJECTION -- NEVER use ThreeDScene)
 ```python
 ISO_X = np.array([0.7, -0.35, 0])
@@ -429,39 +692,140 @@ def make_pie_slice(self, start_angle, angle, color, label_str):
 CHARACTER LIBRARY (define ALL as methods on MathAnimationScene)
 ==============================================================================
 
-### CARTOON HUMAN (emotion-aware)
+### CARTOON HUMAN (multi-colour: skin tone head, coloured shirt, dark navy pants)
 ```python
-def make_human(self, color=BLUE_C, scale=1.0, emotion="neutral"):
-    head    = Circle(radius=0.32, color=color, fill_color=color, fill_opacity=1)
-    l_eye   = Dot(LEFT*0.12  + UP*0.09, radius=0.055, color=WHITE, fill_opacity=1)
-    r_eye   = Dot(RIGHT*0.12 + UP*0.09, radius=0.055, color=WHITE, fill_opacity=1)
-    l_pupil = Dot(LEFT*0.12  + UP*0.09, radius=0.03,  color=BLACK, fill_opacity=1)
-    r_pupil = Dot(RIGHT*0.12 + UP*0.09, radius=0.03,  color=BLACK, fill_opacity=1)
+def make_human(self, shirt_color=BLUE_C, scale=1.0, emotion="neutral", pose="neutral"):
+    SKIN_C  = "#FDBCB4"   # warm peach skin
+    HAIR_C  = "#1a0f00"   # dark brown hair
+    PANTS_C = "#1e2d5a"   # dark navy trousers
+    SHOE_C  = "#0d0a05"   # dark shoes
+    # Hair: dark circle shifted slightly up so it peeks above the skin-tone head
+    hair_bg = Circle(radius=0.35, color=HAIR_C, fill_color=HAIR_C, fill_opacity=1)
+    hair_bg.shift(UP*0.08)
+    # Skin-tone head (drawn over hair_bg so hair only shows at top)
+    head = Circle(radius=0.32, color=SKIN_C, fill_color=SKIN_C, fill_opacity=1)
+    l_eye   = Dot(LEFT*0.12  + UP*0.07, radius=0.055, color=WHITE,    fill_opacity=1)
+    r_eye   = Dot(RIGHT*0.12 + UP*0.07, radius=0.055, color=WHITE,    fill_opacity=1)
+    l_pupil = Dot(LEFT*0.12  + UP*0.07, radius=0.030, color="#1a1a1a", fill_opacity=1)
+    r_pupil = Dot(RIGHT*0.12 + UP*0.07, radius=0.030, color="#1a1a1a", fill_opacity=1)
+    l_brow  = Line(LEFT*0.19+UP*0.20, LEFT*0.06+UP*0.22, color=HAIR_C, stroke_width=2.5)
+    r_brow  = Line(RIGHT*0.06+UP*0.22, RIGHT*0.19+UP*0.20, color=HAIR_C, stroke_width=2.5)
     if emotion == "happy":
         mouth = Arc(radius=0.12, start_angle=-PI*0.75, angle=PI*0.5,
-                    color=WHITE, stroke_width=3).move_to(DOWN*0.12)
+                    color="#cc4444", stroke_width=2.5).move_to(DOWN*0.10)
     elif emotion == "shocked":
-        mouth = Circle(radius=0.06, color=WHITE, fill_color=WHITE, fill_opacity=1).move_to(DOWN*0.12)
+        mouth = Circle(radius=0.06, color="#cc4444", fill_color="#cc4444", fill_opacity=1).move_to(DOWN*0.10)
+    elif emotion == "thinking":
+        mouth = Arc(radius=0.10, start_angle=-PI*0.5, angle=PI*0.28,
+                    color="#cc4444", stroke_width=2.5).move_to(RIGHT*0.04+DOWN*0.11)
     else:
-        mouth = Line(LEFT*0.09+DOWN*0.12, RIGHT*0.09+DOWN*0.12, color=WHITE, stroke_width=3)
-    face  = VGroup(head, l_eye, r_eye, l_pupil, r_pupil, mouth)
-    torso = RoundedRectangle(width=0.52, height=0.68, corner_radius=0.1,
-                              color=color, fill_color=color, fill_opacity=1)
+        mouth = Line(LEFT*0.09+DOWN*0.10, RIGHT*0.09+DOWN*0.10, color="#cc4444", stroke_width=2.5)
+    face = VGroup(hair_bg, head, l_eye, r_eye, l_pupil, r_pupil, l_brow, r_brow, mouth)
+    # Shirt (shirt_color) torso
+    torso = RoundedRectangle(width=0.52, height=0.68, corner_radius=0.10,
+                              color=shirt_color, fill_color=shirt_color, fill_opacity=1)
     torso.next_to(head, DOWN, buff=0.0)
-    l_arm_u = Line(torso.get_left()+UP*0.18, torso.get_left()+LEFT*0.32+DOWN*0.05,
-                   color=color, stroke_width=6)
-    l_arm_d = Line(l_arm_u.get_end(), l_arm_u.get_end()+DOWN*0.3, color=color, stroke_width=5)
-    r_arm_u = Line(torso.get_right()+UP*0.18, torso.get_right()+RIGHT*0.32+DOWN*0.05,
-                   color=color, stroke_width=6)
-    r_arm_d = Line(r_arm_u.get_end(), r_arm_u.get_end()+DOWN*0.3, color=color, stroke_width=5)
-    l_hand  = Circle(radius=0.08, color=color, fill_color=color, fill_opacity=1).move_to(l_arm_d.get_end())
-    r_hand  = Circle(radius=0.08, color=color, fill_color=color, fill_opacity=1).move_to(r_arm_d.get_end())
-    l_leg = Line(torso.get_bottom()+LEFT*0.12,  torso.get_bottom()+LEFT*0.15+DOWN*0.55,
-                 color=color, stroke_width=6)
-    r_leg = Line(torso.get_bottom()+RIGHT*0.12, torso.get_bottom()+RIGHT*0.15+DOWN*0.55,
-                 color=color, stroke_width=6)
-    l_foot = Ellipse(width=0.28, height=0.12, color=color, fill_color=color, fill_opacity=1).move_to(l_leg.get_end()+DOWN*0.06)
-    r_foot = Ellipse(width=0.28, height=0.12, color=color, fill_color=color, fill_opacity=1).move_to(r_leg.get_end()+DOWN*0.06)
+    # BOTH arms controlled by pose so the whole body tells the story:
+    #   "neutral"   : both arms hang relaxed
+    #   "thinking"  : left arm crosses body (elbow support); right elbow up, hand near chin
+    #   "excited"   : both arms shoot up in a V (eureka! / celebrating)
+    #   "explaining": right arm extended forward; left arm slightly raised for balance
+    if pose == "thinking":
+        l_arm_u = Line(torso.get_left()+UP*0.18, torso.get_left()+RIGHT*0.05+UP*0.22,
+                       color=shirt_color, stroke_width=6)
+        l_arm_d = Line(l_arm_u.get_end(), l_arm_u.get_end()+RIGHT*0.18+UP*0.08,
+                       color=SKIN_C, stroke_width=5)
+        r_arm_u = Line(torso.get_right()+UP*0.18, torso.get_right()+RIGHT*0.12+UP*0.36,
+                       color=shirt_color, stroke_width=6)
+        r_arm_d = Line(r_arm_u.get_end(), r_arm_u.get_end()+LEFT*0.28+UP*0.06,
+                       color=SKIN_C, stroke_width=5)
+    elif pose == "excited":
+        l_arm_u = Line(torso.get_left()+UP*0.18, torso.get_left()+LEFT*0.10+UP*0.36,
+                       color=shirt_color, stroke_width=6)
+        l_arm_d = Line(l_arm_u.get_end(), l_arm_u.get_end()+LEFT*0.06+UP*0.30,
+                       color=SKIN_C, stroke_width=5)
+        r_arm_u = Line(torso.get_right()+UP*0.18, torso.get_right()+RIGHT*0.10+UP*0.36,
+                       color=shirt_color, stroke_width=6)
+        r_arm_d = Line(r_arm_u.get_end(), r_arm_u.get_end()+UP*0.30,
+                       color=SKIN_C, stroke_width=5)
+    elif pose == "explaining":
+        l_arm_u = Line(torso.get_left()+UP*0.18, torso.get_left()+LEFT*0.20+UP*0.15,
+                       color=shirt_color, stroke_width=6)
+        l_arm_d = Line(l_arm_u.get_end(), l_arm_u.get_end()+DOWN*0.22,
+                       color=SKIN_C, stroke_width=5)
+        r_arm_u = Line(torso.get_right()+UP*0.18, torso.get_right()+RIGHT*0.30+UP*0.10,
+                       color=shirt_color, stroke_width=6)
+        r_arm_d = Line(r_arm_u.get_end(), r_arm_u.get_end()+RIGHT*0.28,
+                       color=SKIN_C, stroke_width=5)
+    else:  # neutral
+        l_arm_u = Line(torso.get_left()+UP*0.18, torso.get_left()+LEFT*0.30+DOWN*0.03,
+                       color=shirt_color, stroke_width=6)
+        l_arm_d = Line(l_arm_u.get_end(), l_arm_u.get_end()+DOWN*0.30, color=SKIN_C, stroke_width=5)
+        r_arm_u = Line(torso.get_right()+UP*0.18, torso.get_right()+RIGHT*0.30+DOWN*0.03,
+                       color=shirt_color, stroke_width=6)
+        r_arm_d = Line(r_arm_u.get_end(), r_arm_u.get_end()+DOWN*0.30, color=SKIN_C, stroke_width=5)
+    l_hand  = Circle(radius=0.08, color=SKIN_C, fill_color=SKIN_C, fill_opacity=1).move_to(l_arm_d.get_end())
+    r_hand  = Circle(radius=0.08, color=SKIN_C, fill_color=SKIN_C, fill_opacity=1).move_to(r_arm_d.get_end())
+    # Dark navy trousers + dark shoes
+    l_leg   = Line(torso.get_bottom()+LEFT*0.12,  torso.get_bottom()+LEFT*0.15+DOWN*0.55,
+                   color=PANTS_C, stroke_width=7)
+    r_leg   = Line(torso.get_bottom()+RIGHT*0.12, torso.get_bottom()+RIGHT*0.15+DOWN*0.55,
+                   color=PANTS_C, stroke_width=7)
+    l_foot  = Ellipse(width=0.28, height=0.12, color=SHOE_C, fill_color=SHOE_C, fill_opacity=1).move_to(l_leg.get_end()+DOWN*0.06)
+    r_foot  = Ellipse(width=0.28, height=0.12, color=SHOE_C, fill_color=SHOE_C, fill_opacity=1).move_to(r_leg.get_end()+DOWN*0.06)
+    return VGroup(face, torso, l_arm_u, l_arm_d, l_hand,
+                  r_arm_u, r_arm_d, r_hand,
+                  l_leg, l_foot, r_leg, r_foot).scale(scale)
+```
+
+### ATHLETE (physics / sports scenes -- throwing pose, sports cap)
+```python
+def make_athlete(self, shirt_color=BLUE_C, scale=1.0):
+    SKIN_C  = "#FDBCB4"
+    HAIR_C  = "#1a0f00"
+    PANTS_C = "#1e4a2a"   # dark green sports shorts
+    SHOE_C  = "#0d0a05"
+    CAP_C   = "#1a1a6a"   # dark navy sports cap
+    # Hair behind head
+    hair_bg  = Circle(radius=0.35, color=HAIR_C, fill_color=HAIR_C, fill_opacity=1)
+    hair_bg.shift(UP*0.06)
+    # Sports cap: oval dome + forward brim
+    cap_dome = Ellipse(width=0.68, height=0.24, color=CAP_C, fill_color=CAP_C, fill_opacity=1)
+    cap_dome.shift(UP*0.26)
+    cap_brim = RoundedRectangle(width=0.40, height=0.09, corner_radius=0.02,
+                                  color=CAP_C, fill_color=CAP_C, fill_opacity=1)
+    cap_brim.shift(RIGHT*0.28+UP*0.10)
+    head = Circle(radius=0.32, color=SKIN_C, fill_color=SKIN_C, fill_opacity=1)
+    l_eye   = Dot(LEFT*0.12  + UP*0.07, radius=0.050, color=WHITE,    fill_opacity=1)
+    r_eye   = Dot(RIGHT*0.12 + UP*0.07, radius=0.050, color=WHITE,    fill_opacity=1)
+    l_pupil = Dot(LEFT*0.12  + UP*0.07, radius=0.028, color="#1a1a1a", fill_opacity=1)
+    r_pupil = Dot(RIGHT*0.12 + UP*0.07, radius=0.028, color="#1a1a1a", fill_opacity=1)
+    l_brow  = Line(LEFT*0.19+UP*0.20, LEFT*0.06+UP*0.22, color=HAIR_C, stroke_width=2.5)
+    r_brow  = Line(RIGHT*0.06+UP*0.22, RIGHT*0.19+UP*0.20, color=HAIR_C, stroke_width=2.5)
+    mouth   = Arc(radius=0.10, start_angle=-PI*0.65, angle=PI*0.30,
+                  color="#cc4444", stroke_width=2.5).move_to(DOWN*0.10)
+    face = VGroup(hair_bg, cap_dome, cap_brim, head,
+                  l_eye, r_eye, l_pupil, r_pupil, l_brow, r_brow, mouth)
+    torso = RoundedRectangle(width=0.52, height=0.65, corner_radius=0.10,
+                              color=shirt_color, fill_color=shirt_color, fill_opacity=1)
+    torso.next_to(head, DOWN, buff=0.0)
+    # Left arm: relaxed/back
+    l_arm_u = Line(torso.get_left()+UP*0.18, torso.get_left()+LEFT*0.22+DOWN*0.05,
+                   color=shirt_color, stroke_width=6)
+    l_arm_d = Line(l_arm_u.get_end(), l_arm_u.get_end()+LEFT*0.06+DOWN*0.28, color=SKIN_C, stroke_width=5)
+    l_hand  = Circle(radius=0.08, color=SKIN_C, fill_color=SKIN_C, fill_opacity=1).move_to(l_arm_d.get_end())
+    # Right arm: RAISED FORWARD (throwing pose -- goes UP+RIGHT)
+    r_arm_u = Line(torso.get_right()+UP*0.22, torso.get_right()+RIGHT*0.12+UP*0.32,
+                   color=shirt_color, stroke_width=6)
+    r_arm_d = Line(r_arm_u.get_end(), r_arm_u.get_end()+RIGHT*0.24+UP*0.14, color=SKIN_C, stroke_width=5)
+    r_hand  = Circle(radius=0.08, color=SKIN_C, fill_color=SKIN_C, fill_opacity=1).move_to(r_arm_d.get_end())
+    # Sports shorts -- one leg forward (running stance)
+    l_leg = Line(torso.get_bottom()+LEFT*0.12,  torso.get_bottom()+LEFT*0.28+DOWN*0.48,
+                 color=PANTS_C, stroke_width=7)
+    r_leg = Line(torso.get_bottom()+RIGHT*0.12, torso.get_bottom()+RIGHT*0.10+DOWN*0.55,
+                 color=PANTS_C, stroke_width=7)
+    l_foot = Ellipse(width=0.30, height=0.12, color=SHOE_C, fill_color=SHOE_C, fill_opacity=1).move_to(l_leg.get_end()+DOWN*0.06)
+    r_foot = Ellipse(width=0.30, height=0.12, color=SHOE_C, fill_color=SHOE_C, fill_opacity=1).move_to(r_leg.get_end()+DOWN*0.06)
     return VGroup(face, torso, l_arm_u, l_arm_d, l_hand,
                   r_arm_u, r_arm_d, r_hand,
                   l_leg, l_foot, r_leg, r_foot).scale(scale)
@@ -594,54 +958,95 @@ def confetti(self, origin=ORIGIN, n=20):
 DOMAIN -> CHARACTER SMART SELECTION (always from the DETECTED domain)
 ==============================================================================
 
+CHARACTER RULE -- MANDATORY:
+  DEFAULT CHARACTER: make_human(shirt_color=...) with distinct skin/hair/shirt/pants.
+  make_emoji() may ONLY be used as small accent decorations (scale 0.5-0.7, at screen edges)
+  or as a quick reaction pop-up that FadeOuts immediately. NEVER as the main character.
+  make_emoji() as a large standing character looks like a generic yellow blob -- students
+  disengage. make_human() has skin tone, hair, coloured shirt and dark pants -- it looks
+  like a real cartoon boy or girl.
+
+  FORBIDDEN: make_emoji() at scale > 0.8 as a standing character.
+  FORBIDDEN: Two large emoji faces at LEFT and RIGHT edges as the "characters".
+  CORRECT:   make_human(shirt_color=BLUE_C,  scale=1.0, emotion="shocked") at LEFT edge.
+             make_human(shirt_color=GREEN_C, scale=1.0, emotion="happy")   at RIGHT edge.
+  PHYSICS:   make_athlete(shirt_color=BLUE_C, scale=0.6) at FAR LEFT for projectile/sports.
+
+BODY LANGUAGE POSES -- use pose= to match the story moment:
+  pose="neutral"   : arms hanging down (default -- standing at rest, listening)
+  pose="thinking"  : right arm bent up, forearm toward chin (pondering, confused, reading)
+  pose="excited"   : right arm raised straight up (eureka!, got the answer, celebrating)
+  pose="explaining": right arm extended forward/sideways (pointing at equation, presenting)
+
+  CONTEXTUAL POSE GUIDE (change pose between acts to tell a story with body language):
+    Character first sees the problem         -> pose="thinking",  emotion="thinking"
+    Character gets the key insight           -> pose="excited",   emotion="happy"
+    Character explains a step to viewer     -> pose="explaining", emotion="neutral"
+    Character celebrating the final answer   -> pose="excited",   emotion="happy"
+    Character surprised by the result        -> pose="neutral",   emotion="shocked"
+  REBUILD the character with a new pose between acts using GrowFromCenter() or FadeIn()
+  so the body language visibly changes. Example:
+    char = self.make_human(shirt_color=TEAL, emotion="thinking", pose="thinking")
+    char.to_edge(RIGHT).shift(LEFT*0.5+DOWN*0.5)
+    self.play(GrowFromCenter(char))
+    # ... equations play ...
+    self.play(FadeOut(char))
+    char2 = self.make_human(shirt_color=TEAL, emotion="happy", pose="excited")
+    char2.to_edge(RIGHT).shift(LEFT*0.5+DOWN*0.5)
+    self.play(GrowFromCenter(char2))
+
 DETECTED DOMAIN       | CHARACTERS + STYLE
 ----------------------|-------------------------------------------------------
-Algebra / Equations   | make_robot analyzes balance scale (LEFT edge)
-                      | make_human detective at RIGHT -- solving the "case"
+Algebra / Equations   | make_human(shirt_color=TEAL, emotion="thinking") detective at RIGHT
+                      | make_robot() analyzes balance scale (LEFT edge)
                       | Puzzle lock opens each step; stars burst on answer
 ----------------------|-------------------------------------------------------
-Calculus derivatives  | make_human RIDES a car/ball along the curve
-                      | make_robot at RIGHT reads out the slope value
+Calculus derivatives  | make_human(shirt_color=ORANGE) RIDES a car/ball along the curve (LEFT)
+                      | make_robot() at RIGHT reads out the slope value
                       | Roller coaster genre: "SPEED:" HUD updating
 ----------------------|-------------------------------------------------------
 Calculus integrals    | Water/color fills area under curve (wave animation)
-                      | make_emoji "shocked" as area fills -- "That much?!"
+                      | make_human(emotion="shocked") at edge as area fills
                       | Bridge or tank as real-world anchor
 ----------------------|-------------------------------------------------------
-Geometry              | make_human DRAWS shapes with a compass (architect)
+Geometry              | make_human() architect DRAWS shapes with a compass (LEFT)
                       | Blueprint grid background (crosshatch gray lines)
                       | Shapes construct themselves with Create() + glow
 ----------------------|-------------------------------------------------------
-Trigonometry          | make_human SPINS on unit circle like a dance move
+Trigonometry          | make_human() SPINS on unit circle like a dance move
                       | Sound wave rises from circle at right
-                      | make_robot at edge reads "frequency: X Hz"
+                      | make_robot() at edge reads "frequency: X Hz"
 ----------------------|-------------------------------------------------------
-Statistics            | make_emoji DETECTIVE with magnifying glass
+Statistics            | make_human(emotion="neutral") DETECTIVE with magnifying glass
                       | Data dots appear one by one on a map/grid
                       | Bar chart bars GROW from zero dramatically
 ----------------------|-------------------------------------------------------
-Linear Algebra        | make_robot OPERATES on vectors (pushes them)
+Linear Algebra        | make_robot() OPERATES on vectors (pushes them)
                       | Grid lines transform under matrix multiplication
                       | Stars trail behind transformed vectors
 ----------------------|-------------------------------------------------------
-Physics / Kinematics  | Domain OBJECTS (sphere, car, projectile) ARE the hero
-                      | make_human sports commentator at FAR edge (scale 0.5)
+Physics / Kinematics  | Domain OBJECTS (sphere, car, ball) ARE the hero
+                      | make_human(shirt_color=ORANGE, scale=0.55) sports commentator at FAR RIGHT
+                      | Projectile: make_athlete(shirt_color=BLUE_C, scale=0.6) at FAR LEFT
+                      |   ball is center-stage; stadium sky+grass background mandatory
+                      | Free fall: ball on LEFT half; height axis; equations on RIGHT half
+                      | Newton's Laws / Forces: free body diagram + make_athlete() for dynamics
                       | Force arrows grow; energy bars animate
 ----------------------|-------------------------------------------------------
 Quadratics            | Arcade game style: ball bounces, score updates
-                      | make_human player at LEFT, cheering
+                      | make_human(emotion="happy") player at LEFT edge, cheering
                       | Parabola arc drawn as the "shot path"
 ----------------------|-------------------------------------------------------
-Number Theory         | make_robot CRACKS the lock (prime combination)
+Number Theory         | make_robot() CRACKS the lock (prime combination)
                       | Cryptography vault visual: digits clicking into place
-                      | make_emoji "cool" with sunglasses when it unlocks
+                      | make_human(emotion="happy") cheers when it unlocks
 ----------------------|-------------------------------------------------------
-Word Problems-People  | make_human (scale 1.0) ARE the scene actors
+Word Problems-People  | make_human() (scale 1.0) ARE the scene actors
                       | Each person gets a badge; they walk in from edges
                       | Average bar appears between them
 ----------------------|-------------------------------------------------------
 Word Problems-Objects | Domain objects (coins, pizza, vehicles) ARE actors
-                      | make_emoji as side commentator; objects animate
+                      | make_human() as side commentator at edge; objects animate
                       | Flowers + stars as accent decorations
 
 DECORATION RULES (apply to EVERY animation):
@@ -705,6 +1110,22 @@ OVERLAP RULE 5F -- FORCE ARROWS: gravity=DOWN, normal=UP-LEFT, friction=UP-RIGHT
   Labels at arrow.get_end() with next_to(), shift outward extra 0.2 if crowded
 OVERLAP RULE 5G -- INCLINE on LEFT half (shift LEFT*1.5), equations on RIGHT half
 OVERLAP RULE 5H -- PRE-PLACEMENT CHECK: "What is on screen? Does new object fit?"
+
+OVERLAP RULE 5I -- LONG FORMULA + PARAMETER SEPARATION:
+  If a formula string is longer than 22 characters (e.g., "T_k+1 = C(n,k)*a^(n-k)*b^k"),
+  use font_size <= 34. NEVER use font_size >= 40 for any formula > 20 characters long.
+  NEVER show formula + parameter labels + answer box all simultaneously on screen.
+  Show them in sequence -- FadeOut old objects before showing the next group:
+    Step 1: Show formula in title zone (font_size=32-34, to_edge(UP))
+    Step 2: Show parameter group BELOW formula using VGroup.arrange(RIGHT, buff=0.6):
+              params = VGroup(
+                  Text("a = 2x", font_size=30),
+                  Text("b = -1/x", font_size=30),
+                  Text("n = 8", font_size=30),
+              ).arrange(RIGHT, buff=0.7)
+              params.next_to(formula, DOWN, buff=0.4)
+    Step 3: FadeOut(formula, params), then show the working/solution steps
+  NEVER place parameter labels inline with the formula on the same line -- they WILL overlap.
 
 CRITICAL ANTI-OVERLAP PATTERN for equation sequences:
   # ALWAYS use VGroup.arrange -- NEVER manual positioning of stacked text:
@@ -788,13 +1209,23 @@ RULE 1 -- Domain visualization first
   Choose visualization from GENRE table before writing code.
   The graph/object IS the main stage; characters are the side stage.
 
-RULE 2 -- Characters MANDATORY with DIALOGUE
-  At least TWO characters per animation. Place at left and right edges.
-  Characters REACT to each math step with speech bubbles -- they TALK to each other.
-  Example: LEFT character asks "What's the derivative?",
-           RIGHT character responds "3x squared minus 6!"
-  Characters transform: start "shocked", become "neutral", end "happy".
-  Select characters from DOMAIN -> CHARACTER SMART SELECTION table ONLY.
+RULE 2 -- Characters are SIDE COMMENTATORS, NEVER the main stage
+  Domain OBJECTS own the center zone (x: -3.5 to +3.5) in every act.
+  Characters (human, robot, emoji) sit at screen EDGES (x < -4.5 or x > 4.5).
+  Characters speak 1-2 dialogue lines per act, then FADE OUT -- they never linger.
+  At least 3 of the 5 acts must show a DOMAIN OBJECT as the primary center-stage visual:
+    curve, parabola, rolling sphere, balance scale, bar chart, unit circle, etc.
+  Characters REACT to what the domain object does -- NOT the reverse.
+  Example: ball bounces along parabola arc (center) → emoji at RIGHT edge goes "shocked".
+  Select character TYPES from DOMAIN -> CHARACTER SMART SELECTION table:
+    Calculus   → make_human(shirt_color=ORANGE) rides curve + make_robot reads value
+    Physics    → OBJECTS are heroes; make_human() commentator at far right ONLY;
+                 Projectile/Sports → make_athlete() at far LEFT in throwing pose
+    Algebra    → make_robot (center-left); make_human(shirt_color=TEAL) detective at RIGHT
+    Geometry   → make_human(shirt_color=BLUE_C) architect DRAWS with compass
+    Statistics → make_human(emotion="neutral") detective; bars/chart = center
+    Quadratics → ball IS hero; make_human(emotion="happy") player at edge cheering
+  Use make_human() (with shirt_color) as the default. NEVER two plain emoji blobs as characters.
 
 RULE 3 -- Gradient on every title AND every answer
   Every title: .set_color_by_gradient(BLUE, PURPLE)
@@ -816,25 +1247,44 @@ RULE 6 -- Font size discipline
   FINAL ANSWER: 56-68 (the largest text in the entire animation)
   Never show two font>40 texts simultaneously.
 
-RULE 7 -- Pacing (MINIMUM wait times)
-  After Write(equation): wait(1.0)
-  After character dialogue exchange: wait(0.8) per line
-  After Indicate/Flash: wait(0.5)
-  After confetti/level-up: wait(1.5)
-  Final answer hold: wait(3.5) -- students NEED time to read it
-  Closing insight hold: wait(3.0)
-  Total self.wait() >= 70 seconds
+RULE 7 -- Pacing (keep waits SHORT -- total budget is 20-35 seconds)
+  After Write(equation): wait(0.8)
+  After character dialogue exchange: wait(0.6) per line
+  After Indicate/Flash: wait(0.4)
+  After confetti/level-up: wait(1.0)
+  Final answer hold: wait(2.5) -- students need time to read it
+  Closing insight hold: wait(2.0)
+  Total self.wait() budget: 20-35 seconds across the ENTIRE script.
+  HARD CAP: maximum 18 total self.play() calls in construct(). COUNT them before submitting.
+  TARGET: 55-75 second total animation. At quality m (720p30) this renders in ~60-90 s,
+  safely under the 150 s render timeout. Animations over 110 s time out and FAIL.
+  NEVER pile up self.wait() calls to hit a minimum -- quality beats duration.
+  MANDATORY ENDING: The very LAST line of construct() MUST be self.wait(3.0).
+  This ensures the TTS audio narration finishes before the video file ends.
 
 RULE 8 -- Smooth transitions
   FadeOut all objects before new act. LaggedStart for groups.
   Use Succession for chained actions without abrupt cuts.
 
 RULE 9 -- Objects PHYSICALLY ENACT the solution
-  Physics: sphere ROLLS, car MOVES, projectile ARCS
+  Physics/Kinematics (free fall, velocity): ball FALLS top-to-bottom through height h;
+    height axis on LEFT half; equations substituted step-by-step on RIGHT half;
+    ball impacts ground with Flash() when answer is reached.
+    Use the VERTICAL FREE FALL helper from STEP 2 -- it has the exact code pattern.
+  Physics/Inclined: sphere ROLLS down the incline; force arrows appear at each step
+  Physics/Projectile (angled launch -- Hmax, T, R):
+    MANDATORY: use the PROJECTILE MOTION helper from STEP 2 -- exact code pattern.
+    - Stadium background (dark blue sky + green grass) -- not a plain black background
+    - Boy/athlete at FAR LEFT edge (scale 0.6, x < -5.5) in throwing pose -- NOT center stage
+    - Dashed parabolic arc drawn using ParametricFunction with proj_pt() mapping
+    - Ball animates along arc via ValueTracker (run_time=3.0, rate_func=smooth)
+    - Three velocity vectors at launch: u white diagonal, ux teal horizontal, uy orange vertical
+    - At peak: dashed vertical line + "Hmax" brace + "vy=0 at peak" label
+    - Flash() on landing; three gold answer boxes: Hmax, T, R side by side
   Algebra: scale pans MOVE, equations TRANSFORM on screen
   Calculus: ball RIDES the curve, area FILLS like water
   Statistics: bars GROW from zero
-  Quadratics: ball BOUNCES along the parabola arc
+  Quadratics: ball BOUNCES along the parabola arc and lands at the root
   The object IS the proof -- it shows the student what the equation means.
 
 RULE 10 -- Color coding throughout
@@ -847,12 +1297,13 @@ RULE 11 -- Real-world anchor in every act
   rocket, bridge, DNA strand, satellite dish, hospital monitor, sound wave, GPS pin
   This object is introduced in Act 1 and RETURNS in the closing act.
 
-RULE 12 -- 5-Act minimum structure
-  Act 1: Genre opening + real-world stakes + character introduction
-  Act 2: Domain visualization (graph/shape/physical scene) + discovery origin
-  Act 3: Step-by-step math derivation (equations transform on screen)
-  Act 4: Answer applied back to real world (object reacts to the answer)
-  Act 5: CLOSING ACT (see RULE 14 -- NEVER SKIP)
+RULE 12 -- 3-Act structure (DO NOT exceed 3 acts -- 5 acts times out the renderer)
+  Act 1: Genre opening + character intro + domain visualization (ALL IN ONE ACT, ~6 self.play calls)
+  Act 2: Step-by-step math derivation -- equations transform; domain object physically shows the math
+         (~6 self.play calls)
+  Act 3: CLOSING ACT (see RULE 14 -- NEVER SKIP, ~6 self.play calls)
+  Total: ~18 self.play() calls, ~55-75 second animation, renders in <90 s at quality m.
+  NEVER add a 4th or 5th act -- it pushes the animation past the render timeout.
 
 RULE 13 -- No debug text, no meta-text
   ONLY on screen: math equations, physics labels, step titles, character dialogue
@@ -891,11 +1342,11 @@ punchline = Text("[What this answer means in real life]", font_size=28, color=TE
 punchline.set_color_by_gradient(TEAL, GREEN_C)
 punchline.next_to(answer, DOWN, buff=0.5)
 self.play(FadeIn(punchline, shift=UP*0.3))
-self.wait(3.5)   # hold -- students need to read this
+self.wait(2.5)   # hold -- students need to read this
 
-# 4. Celebrating characters bounce
-char1 = self.make_emoji("happy").scale(1.1).shift(LEFT*4.5 + DOWN*1.5)
-char2 = self.make_emoji("happy").scale(1.1).shift(RIGHT*4.5 + DOWN*1.5)
+# 4. Celebrating characters bounce (use make_human -- never make_emoji as main character)
+char1 = self.make_human(shirt_color=BLUE_C,  scale=0.9, emotion="happy").shift(LEFT*4.5 + DOWN*1.5)
+char2 = self.make_human(shirt_color=GREEN_C, scale=0.9, emotion="happy").shift(RIGHT*4.5 + DOWN*1.5)
 self.play(GrowFromCenter(char1), GrowFromCenter(char2))
 for _ in range(3):
     self.play(char1.animate.shift(UP*0.45), char2.animate.shift(UP*0.45),
@@ -907,10 +1358,10 @@ insight = Text("[One inspiring sentence about this math in the world]",
                font_size=26, color=GRAY_A)
 insight.set_color_by_gradient(TEAL, BLUE_C)
 insight.to_edge(DOWN).shift(UP*0.4)
-self.play(Write(insight), run_time=2.0)
-self.wait(3.0)
-self.play(FadeOut(Group(*self.mobjects)), run_time=1.0)
-self.wait(0.5)
+self.play(Write(insight), run_time=1.5)
+self.wait(2.0)
+self.play(FadeOut(Group(*self.mobjects)), run_time=0.8)
+self.wait(3.0)   # MANDATORY: hold for TTS audio to finish
 ```
 
 REPLACE the placeholder strings with ACTUAL values from the solved problem:
@@ -928,7 +1379,13 @@ Algebra:       escape room aesthetic; lock; balance scale pans physically move
 Geometry:      blueprint paper texture (light gray grid lines); compass drawing
 Trigonometry:  circular wave emanating from unit circle; sound studio feel
 Statistics:    dark map background; data dots light up one by one like clues
-Physics:       sports broadcast; split screen equation + physical motion
+Physics:       sports broadcast; "INSTANT REPLAY" HUD banner at top;
+               Free Fall: ball FALLS on LEFT half; height axis; equations on RIGHT half;
+                 RED gravity arrow on object; impact Flash() at ground.
+               Projectile Motion: stadium background (dark blue sky + green grass);
+                 boy at FAR LEFT edge; dashed parabolic arc; ball flies via ValueTracker;
+                 three velocity vectors (u/ux/uy); Hmax dashed line at peak;
+                 three gold answer boxes (Hmax / T / R) at the end.
 Linear Alg:    matrix rain aesthetic; vectors glow as they transform
 Exponential:   time-lapse; cells/points multiply exponentially on screen
 
@@ -947,37 +1404,121 @@ import numpy as np
 
 class MathAnimationScene(Scene):
 
-    def make_human(self, color=BLUE_C, scale=1.0, emotion="neutral"):
-        head    = Circle(radius=0.32, color=color, fill_color=color, fill_opacity=1)
-        l_eye   = Dot(LEFT*0.12  + UP*0.09, radius=0.055, color=WHITE, fill_opacity=1)
-        r_eye   = Dot(RIGHT*0.12 + UP*0.09, radius=0.055, color=WHITE, fill_opacity=1)
-        l_pupil = Dot(LEFT*0.12  + UP*0.09, radius=0.03,  color=BLACK, fill_opacity=1)
-        r_pupil = Dot(RIGHT*0.12 + UP*0.09, radius=0.03,  color=BLACK, fill_opacity=1)
+    def make_human(self, shirt_color=BLUE_C, scale=1.0, emotion="neutral", pose="neutral"):
+        SKIN_C  = "#FDBCB4"
+        HAIR_C  = "#1a0f00"
+        PANTS_C = "#1e2d5a"
+        SHOE_C  = "#0d0a05"
+        hair_bg = Circle(radius=0.35, color=HAIR_C, fill_color=HAIR_C, fill_opacity=1)
+        hair_bg.shift(UP*0.08)
+        head = Circle(radius=0.32, color=SKIN_C, fill_color=SKIN_C, fill_opacity=1)
+        l_eye   = Dot(LEFT*0.12  + UP*0.07, radius=0.055, color=WHITE,    fill_opacity=1)
+        r_eye   = Dot(RIGHT*0.12 + UP*0.07, radius=0.055, color=WHITE,    fill_opacity=1)
+        l_pupil = Dot(LEFT*0.12  + UP*0.07, radius=0.030, color="#1a1a1a", fill_opacity=1)
+        r_pupil = Dot(RIGHT*0.12 + UP*0.07, radius=0.030, color="#1a1a1a", fill_opacity=1)
+        l_brow  = Line(LEFT*0.19+UP*0.20, LEFT*0.06+UP*0.22, color=HAIR_C, stroke_width=2.5)
+        r_brow  = Line(RIGHT*0.06+UP*0.22, RIGHT*0.19+UP*0.20, color=HAIR_C, stroke_width=2.5)
         if emotion == "happy":
             mouth = Arc(radius=0.12, start_angle=-PI*0.75, angle=PI*0.5,
-                        color=WHITE, stroke_width=3).move_to(DOWN*0.12)
+                        color="#cc4444", stroke_width=2.5).move_to(DOWN*0.10)
         elif emotion == "shocked":
-            mouth = Circle(radius=0.06, color=WHITE, fill_color=WHITE, fill_opacity=1).move_to(DOWN*0.12)
+            mouth = Circle(radius=0.06, color="#cc4444", fill_color="#cc4444", fill_opacity=1).move_to(DOWN*0.10)
+        elif emotion == "thinking":
+            mouth = Arc(radius=0.10, start_angle=-PI*0.5, angle=PI*0.28,
+                        color="#cc4444", stroke_width=2.5).move_to(RIGHT*0.04+DOWN*0.11)
         else:
-            mouth = Line(LEFT*0.09+DOWN*0.12, RIGHT*0.09+DOWN*0.12, color=WHITE, stroke_width=3)
-        face  = VGroup(head, l_eye, r_eye, l_pupil, r_pupil, mouth)
-        torso = RoundedRectangle(width=0.52, height=0.68, corner_radius=0.1,
-                                  color=color, fill_color=color, fill_opacity=1)
+            mouth = Line(LEFT*0.09+DOWN*0.10, RIGHT*0.09+DOWN*0.10, color="#cc4444", stroke_width=2.5)
+        face = VGroup(hair_bg, head, l_eye, r_eye, l_pupil, r_pupil, l_brow, r_brow, mouth)
+        torso = RoundedRectangle(width=0.52, height=0.68, corner_radius=0.10,
+                                  color=shirt_color, fill_color=shirt_color, fill_opacity=1)
         torso.next_to(head, DOWN, buff=0.0)
-        l_arm_u = Line(torso.get_left()+UP*0.18, torso.get_left()+LEFT*0.32+DOWN*0.05,
-                       color=color, stroke_width=6)
-        l_arm_d = Line(l_arm_u.get_end(), l_arm_u.get_end()+DOWN*0.3, color=color, stroke_width=5)
-        r_arm_u = Line(torso.get_right()+UP*0.18, torso.get_right()+RIGHT*0.32+DOWN*0.05,
-                       color=color, stroke_width=6)
-        r_arm_d = Line(r_arm_u.get_end(), r_arm_u.get_end()+DOWN*0.3, color=color, stroke_width=5)
-        l_hand  = Circle(radius=0.08, color=color, fill_color=color, fill_opacity=1).move_to(l_arm_d.get_end())
-        r_hand  = Circle(radius=0.08, color=color, fill_color=color, fill_opacity=1).move_to(r_arm_d.get_end())
+        if pose == "thinking":
+            l_arm_u = Line(torso.get_left()+UP*0.18, torso.get_left()+RIGHT*0.05+UP*0.22,
+                           color=shirt_color, stroke_width=6)
+            l_arm_d = Line(l_arm_u.get_end(), l_arm_u.get_end()+RIGHT*0.18+UP*0.08,
+                           color=SKIN_C, stroke_width=5)
+            r_arm_u = Line(torso.get_right()+UP*0.18, torso.get_right()+RIGHT*0.12+UP*0.36,
+                           color=shirt_color, stroke_width=6)
+            r_arm_d = Line(r_arm_u.get_end(), r_arm_u.get_end()+LEFT*0.28+UP*0.06,
+                           color=SKIN_C, stroke_width=5)
+        elif pose == "excited":
+            l_arm_u = Line(torso.get_left()+UP*0.18, torso.get_left()+LEFT*0.10+UP*0.36,
+                           color=shirt_color, stroke_width=6)
+            l_arm_d = Line(l_arm_u.get_end(), l_arm_u.get_end()+LEFT*0.06+UP*0.30,
+                           color=SKIN_C, stroke_width=5)
+            r_arm_u = Line(torso.get_right()+UP*0.18, torso.get_right()+RIGHT*0.10+UP*0.36,
+                           color=shirt_color, stroke_width=6)
+            r_arm_d = Line(r_arm_u.get_end(), r_arm_u.get_end()+UP*0.30,
+                           color=SKIN_C, stroke_width=5)
+        elif pose == "explaining":
+            l_arm_u = Line(torso.get_left()+UP*0.18, torso.get_left()+LEFT*0.20+UP*0.15,
+                           color=shirt_color, stroke_width=6)
+            l_arm_d = Line(l_arm_u.get_end(), l_arm_u.get_end()+DOWN*0.22,
+                           color=SKIN_C, stroke_width=5)
+            r_arm_u = Line(torso.get_right()+UP*0.18, torso.get_right()+RIGHT*0.30+UP*0.10,
+                           color=shirt_color, stroke_width=6)
+            r_arm_d = Line(r_arm_u.get_end(), r_arm_u.get_end()+RIGHT*0.28,
+                           color=SKIN_C, stroke_width=5)
+        else:
+            l_arm_u = Line(torso.get_left()+UP*0.18, torso.get_left()+LEFT*0.30+DOWN*0.03,
+                           color=shirt_color, stroke_width=6)
+            l_arm_d = Line(l_arm_u.get_end(), l_arm_u.get_end()+DOWN*0.30, color=SKIN_C, stroke_width=5)
+            r_arm_u = Line(torso.get_right()+UP*0.18, torso.get_right()+RIGHT*0.30+DOWN*0.03,
+                           color=shirt_color, stroke_width=6)
+            r_arm_d = Line(r_arm_u.get_end(), r_arm_u.get_end()+DOWN*0.30, color=SKIN_C, stroke_width=5)
+        l_hand  = Circle(radius=0.08, color=SKIN_C, fill_color=SKIN_C, fill_opacity=1).move_to(l_arm_d.get_end())
+        r_hand  = Circle(radius=0.08, color=SKIN_C, fill_color=SKIN_C, fill_opacity=1).move_to(r_arm_d.get_end())
         l_leg   = Line(torso.get_bottom()+LEFT*0.12,  torso.get_bottom()+LEFT*0.15+DOWN*0.55,
-                       color=color, stroke_width=6)
+                       color=PANTS_C, stroke_width=7)
         r_leg   = Line(torso.get_bottom()+RIGHT*0.12, torso.get_bottom()+RIGHT*0.15+DOWN*0.55,
-                       color=color, stroke_width=6)
-        l_foot  = Ellipse(width=0.28, height=0.12, color=color, fill_color=color, fill_opacity=1).move_to(l_leg.get_end()+DOWN*0.06)
-        r_foot  = Ellipse(width=0.28, height=0.12, color=color, fill_color=color, fill_opacity=1).move_to(r_leg.get_end()+DOWN*0.06)
+                       color=PANTS_C, stroke_width=7)
+        l_foot  = Ellipse(width=0.28, height=0.12, color=SHOE_C, fill_color=SHOE_C, fill_opacity=1).move_to(l_leg.get_end()+DOWN*0.06)
+        r_foot  = Ellipse(width=0.28, height=0.12, color=SHOE_C, fill_color=SHOE_C, fill_opacity=1).move_to(r_leg.get_end()+DOWN*0.06)
+        return VGroup(face, torso, l_arm_u, l_arm_d, l_hand,
+                      r_arm_u, r_arm_d, r_hand,
+                      l_leg, l_foot, r_leg, r_foot).scale(scale)
+
+    def make_athlete(self, shirt_color=BLUE_C, scale=1.0):
+        SKIN_C  = "#FDBCB4"
+        HAIR_C  = "#1a0f00"
+        PANTS_C = "#1e4a2a"
+        SHOE_C  = "#0d0a05"
+        CAP_C   = "#1a1a6a"
+        hair_bg  = Circle(radius=0.35, color=HAIR_C, fill_color=HAIR_C, fill_opacity=1)
+        hair_bg.shift(UP*0.06)
+        cap_dome = Ellipse(width=0.68, height=0.24, color=CAP_C, fill_color=CAP_C, fill_opacity=1)
+        cap_dome.shift(UP*0.26)
+        cap_brim = RoundedRectangle(width=0.40, height=0.09, corner_radius=0.02,
+                                      color=CAP_C, fill_color=CAP_C, fill_opacity=1)
+        cap_brim.shift(RIGHT*0.28+UP*0.10)
+        head = Circle(radius=0.32, color=SKIN_C, fill_color=SKIN_C, fill_opacity=1)
+        l_eye   = Dot(LEFT*0.12  + UP*0.07, radius=0.050, color=WHITE,    fill_opacity=1)
+        r_eye   = Dot(RIGHT*0.12 + UP*0.07, radius=0.050, color=WHITE,    fill_opacity=1)
+        l_pupil = Dot(LEFT*0.12  + UP*0.07, radius=0.028, color="#1a1a1a", fill_opacity=1)
+        r_pupil = Dot(RIGHT*0.12 + UP*0.07, radius=0.028, color="#1a1a1a", fill_opacity=1)
+        l_brow  = Line(LEFT*0.19+UP*0.20, LEFT*0.06+UP*0.22, color=HAIR_C, stroke_width=2.5)
+        r_brow  = Line(RIGHT*0.06+UP*0.22, RIGHT*0.19+UP*0.20, color=HAIR_C, stroke_width=2.5)
+        mouth   = Arc(radius=0.10, start_angle=-PI*0.65, angle=PI*0.30,
+                      color="#cc4444", stroke_width=2.5).move_to(DOWN*0.10)
+        face = VGroup(hair_bg, cap_dome, cap_brim, head,
+                      l_eye, r_eye, l_pupil, r_pupil, l_brow, r_brow, mouth)
+        torso = RoundedRectangle(width=0.52, height=0.65, corner_radius=0.10,
+                                  color=shirt_color, fill_color=shirt_color, fill_opacity=1)
+        torso.next_to(head, DOWN, buff=0.0)
+        l_arm_u = Line(torso.get_left()+UP*0.18, torso.get_left()+LEFT*0.22+DOWN*0.05,
+                       color=shirt_color, stroke_width=6)
+        l_arm_d = Line(l_arm_u.get_end(), l_arm_u.get_end()+LEFT*0.06+DOWN*0.28, color=SKIN_C, stroke_width=5)
+        l_hand  = Circle(radius=0.08, color=SKIN_C, fill_color=SKIN_C, fill_opacity=1).move_to(l_arm_d.get_end())
+        r_arm_u = Line(torso.get_right()+UP*0.22, torso.get_right()+RIGHT*0.12+UP*0.32,
+                       color=shirt_color, stroke_width=6)
+        r_arm_d = Line(r_arm_u.get_end(), r_arm_u.get_end()+RIGHT*0.24+UP*0.14, color=SKIN_C, stroke_width=5)
+        r_hand  = Circle(radius=0.08, color=SKIN_C, fill_color=SKIN_C, fill_opacity=1).move_to(r_arm_d.get_end())
+        l_leg = Line(torso.get_bottom()+LEFT*0.12,  torso.get_bottom()+LEFT*0.28+DOWN*0.48,
+                     color=PANTS_C, stroke_width=7)
+        r_leg = Line(torso.get_bottom()+RIGHT*0.12, torso.get_bottom()+RIGHT*0.10+DOWN*0.55,
+                     color=PANTS_C, stroke_width=7)
+        l_foot = Ellipse(width=0.30, height=0.12, color=SHOE_C, fill_color=SHOE_C, fill_opacity=1).move_to(l_leg.get_end()+DOWN*0.06)
+        r_foot = Ellipse(width=0.30, height=0.12, color=SHOE_C, fill_color=SHOE_C, fill_opacity=1).move_to(r_leg.get_end()+DOWN*0.06)
         return VGroup(face, torso, l_arm_u, l_arm_d, l_hand,
                       r_arm_u, r_arm_d, r_hand,
                       l_leg, l_foot, r_leg, r_foot).scale(scale)
@@ -1242,24 +1783,23 @@ class MathAnimationScene(Scene):
         punchline.set_color_by_gradient(TEAL, GREEN_C)
         punchline.next_to(answer, DOWN, buff=0.5)
         self.play(FadeIn(punchline, shift=UP*0.3))
-        self.wait(3.5)
+        self.wait(2.5)
 
         char1 = self.make_emoji("happy").scale(1.1).shift(LEFT*4.5 + DOWN*1.5)
         char2 = self.make_emoji("happy").scale(1.1).shift(RIGHT*4.5 + DOWN*1.5)
         self.play(GrowFromCenter(char1), GrowFromCenter(char2))
-        for _ in range(3):
+        for _ in range(2):
             self.play(char1.animate.shift(UP*0.45), char2.animate.shift(UP*0.45),
                       rate_func=there_and_back, run_time=0.35)
-        self.wait(0.5)
 
         insight = Text("Every roller coaster, every bridge arch -- designed by this math.",
                        font_size=26, color=GRAY_A)
         insight.set_color_by_gradient(TEAL, BLUE_C)
         insight.to_edge(DOWN).shift(UP*0.4)
-        self.play(Write(insight), run_time=2.0)
-        self.wait(3.0)
-        self.play(FadeOut(Group(*self.mobjects)), run_time=1.0)
-        self.wait(0.5)
+        self.play(Write(insight), run_time=1.5)
+        self.wait(2.0)
+        self.play(FadeOut(Group(*self.mobjects)), run_time=0.8)
+        self.wait(0.3)
 ```
 
 ==============================================================================
@@ -1286,6 +1826,9 @@ SELF-CHECK BEFORE CALLING run_manim_animation
 - [ ] Gradient background Rectangle added first with self.add(bg)
 - [ ] TWO characters present -- at LEFT edge (x<-4.5) and RIGHT edge (x>4.5)
 - [ ] Characters have DIALOGUE (speech bubbles, at least 2 exchanges)
+- [ ] Characters match the domain type (NOT make_human for all domains -- see RULE 2)
+- [ ] Domain OBJECT is the center-stage visual in both Act 1 and Act 2
+- [ ] Total self.wait() is 20-35 seconds across entire script
 - [ ] Genre visual present: game HUD / blueprint grid / roller coaster track / sound wave etc.
 - [ ] Every title and every answer has .set_color_by_gradient(...)
 - [ ] At least 3 genre moments: wiggle/crash/jump/level-up/score/confetti/dialogue/float/particle
@@ -1298,8 +1841,8 @@ SELF-CHECK BEFORE CALLING run_manim_animation
 - [ ] CLOSING ACT present: answer revealed with rainbow gradient + gold box + Flash + confetti
 - [ ] Closing punchline: what the answer means in real life
 - [ ] Closing insight: one inspiring sentence about this math
-- [ ] self.wait(3.5) after answer reveal -- students need time to read
-- [ ] Total self.wait() >= 70 seconds
+- [ ] self.wait(2.5) after answer reveal -- students need time to read
+- [ ] Total self.wait() 20-35 s; total self.play() calls <= 18; animation 55-75 s total
 - [ ] No two font>40 texts on screen at same time
 - [ ] Final answer has font_size >= 56
 - [ ] VALID color names: BLUE_E not DARK_BLUE; GREEN_E not DARK_GREEN;
@@ -1310,6 +1853,9 @@ SELF-CHECK BEFORE CALLING run_manim_animation
 - [ ] Derived answer in closing act matches the actual computed solution
 - [ ] Real-world punchline connects answer value to domain application
 - [ ] Physics: arrows colored RED=gravity, GREEN_C=normal, ORANGE=friction, YELLOW=accel
+- [ ] Physics/Kinematics free fall: height axis LEFT half, ball at top, RED gravity arrow,
+      h/u labels near ball, ground line at bottom; ball FALLS to ground as equations appear;
+      impact Flash() when ball hits ground; use VERTICAL FREE FALL helper from STEP 2
 - [ ] Calculus: curve drawn, dot/ball rides curve, area fills for integrals
 - [ ] Algebra: balance scale pans physically move; equations Transform on screen
 - [ ] Statistics: bars grow from zero; pie sectors animate

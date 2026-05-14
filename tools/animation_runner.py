@@ -54,9 +54,12 @@ _LATEX_UNICODE = [
     ("^0", "⁰"), ("^1", "¹"), ("^2", "²"), ("^3", "³"), ("^4", "⁴"),
     ("^5", "⁵"), ("^6", "⁶"), ("^7", "⁷"), ("^8", "⁸"), ("^9", "⁹"),
     ("^{-1}", "⁻¹"), ("^{-2}", "⁻²"), ("^{n}", "ⁿ"),
-    # subscripts
-    ("_{0}", "₀"), ("_{1}", "₁"), ("_{2}", "₂"), ("_{3}", "₃"), ("_{4}", "₄"),
-    ("_{n}", "ₙ"), ("_{i}", "ᵢ"), ("_{x}", "ₓ"),
+    # subscripts -- use plain ASCII so Manim's font always renders them (subscript
+    # Unicode chars U+2080-U+209C are NOT in Manim's default Fira-Sans font and
+    # appear as colored boxes; use plain characters instead)
+    ("_{0}", "0"), ("_{1}", "1"), ("_{2}", "2"), ("_{3}", "3"), ("_{4}", "4"),
+    ("_{5}", "5"), ("_{6}", "6"), ("_{7}", "7"), ("_{8}", "8"), ("_{9}", "9"),
+    ("_{n}", "n"), ("_{i}", "i"), ("_{x}", "x"), ("_{t}", "t"),
 ]
 
 # Superscript digit map for single-char exponents inside regex
@@ -492,6 +495,30 @@ def _sanitize_no_latex(code: str) -> str:
         code,
     )
 
+    # 29. Strip Unicode subscript characters (U+2080–U+209C) — Manim's default Fira Sans
+    #     font does not include these glyphs; missing chars render as colored boxes.
+    #     Replace with their plain ASCII digit/letter equivalents.
+    _uni_sub_map = {
+        "₀": "0", "₁": "1", "₂": "2", "₃": "3", "₄": "4",
+        "₅": "5", "₆": "6", "₇": "7", "₈": "8", "₉": "9",
+        "ₙ": "n", "ᵢ": "i", "ₓ": "x", "ₐ": "a", "ₑ": "e",
+        "ₒ": "o", "ᵤ": "u", "ₜ": "t", "ₖ": "k", "ₘ": "m",
+    }
+    for uni_ch, plain_ch in _uni_sub_map.items():
+        code = code.replace(uni_ch, plain_ch)
+
+    # 30. Strip Unicode superscripts that are NOT in Fira Sans: ⁰ ³ ⁴ ⁵ ⁶ ⁷ ⁸ ⁹ ⁿ ⁻
+    #     Keep only ¹ ² ³ which ARE in standard Latin-1 supplement.
+    #     Manim's font supports ² (U+00B2) and ³ (U+00B3) reliably; others may render
+    #     as boxes. Replace rare superscripts with ^N notation inside Text strings.
+    _uni_sup_map = {
+        "⁰": "^0", "⁴": "^4", "⁵": "^5", "⁶": "^6",
+        "⁷": "^7", "⁸": "^8", "⁹": "^9", "ⁿ": "^n",
+        "⁻¹": "^-1", "⁻²": "^-2",
+    }
+    for uni_ch, plain_ch in _uni_sup_map.items():
+        code = code.replace(uni_ch, plain_ch)
+
     return code
 
 
@@ -677,17 +704,59 @@ def _run_tts_in_thread(text: str, mp3_path: Path) -> bool:
         loop.close()
 
 
+def _probe_video_duration(video: Path, ffmpeg_exe: str) -> float | None:
+    """Return video duration in seconds by running ffmpeg -i, or None on failure."""
+    try:
+        probe = subprocess.run(
+            [ffmpeg_exe, "-i", str(video)],
+            capture_output=True, text=True, timeout=10,
+        )
+        m = re.search(r"Duration:\s*(\d+):(\d+):([\d.]+)", probe.stderr + probe.stdout)
+        if m:
+            h, mn, s = int(m.group(1)), int(m.group(2)), float(m.group(3))
+            return h * 3600 + mn * 60 + s
+    except Exception:
+        pass
+    return None
+
+
 def _merge_audio_video(video: Path, audio: Path, out: Path, ffmpeg_exe: str) -> bool:
-    """Merge narration MP3 into video MP4 using ffmpeg. Returns True on success."""
+    """Merge narration MP3 into video MP4 using ffmpeg. Returns True on success.
+
+    Strategy:
+    - Probe the video duration first, then use -t <duration> to clip output
+      at exactly the video length.  This avoids the -c:v copy + filter_complex
+      + -shortest combination that corrupts the moov atom on Windows.
+    - If audio < video: audio plays for its duration, then silence for remainder.
+    - If audio > video: -t clips audio at video end.
+    - -movflags +faststart writes the moov atom at file start, required for
+      HTML5 browser players.
+    """
+    video_dur = _probe_video_duration(video, ffmpeg_exe)
+
     cmd = [
         ffmpeg_exe, "-y",
         "-i", str(video),
         "-i", str(audio),
-        "-c:v", "copy", "-c:a", "aac", "-shortest",
-        str(out),
+        "-c:v", "copy",
+        "-c:a", "aac",
+        "-b:a", "128k",
+        "-map", "0:v:0",
+        "-map", "1:a:0",
     ]
+    if video_dur is not None:
+        # Explicit duration cut — no -shortest, no filter_complex.
+        # Audio shorter than video plays to its natural end; browser plays
+        # silence for any remaining video. Audio longer than video is clipped.
+        cmd += ["-t", str(video_dur)]
+    else:
+        # Duration unknown: clip at shorter stream. Accepts the risk that
+        # narration shorter than animation ends the video early.
+        cmd += ["-shortest"]
+    cmd += ["-movflags", "+faststart", str(out)]
+
     result = subprocess.run(cmd, capture_output=True, timeout=audio_cfg.merge_timeout)
-    return result.returncode == 0 and out.exists()
+    return result.returncode == 0 and out.exists() and out.stat().st_size > 10_000
 
 
 
