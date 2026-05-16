@@ -550,7 +550,8 @@ def _generate_fallback_code(problem_slug: str, question: str, solution_text: str
     # Group steps into pages of 5 lines so they fit vertically on screen
     PAGE = 5
     pages = [step_lines[i : i + PAGE] for i in range(0, len(step_lines), PAGE)]
-    COLORS = ["BLUE_A", "TEAL_A", "GREEN_A", "YELLOW_A", "ORANGE"]
+    # Alternating bullet colors on black (mathematisa-inspired: white body, cyan accent)
+    BULLET_COLORS = ["CYAN", "TEAL", "CYAN", "GREEN_C", "TEAL"]
 
     page_blocks: list[str] = []
     for pg_num, pg_lines in enumerate(pages):
@@ -560,12 +561,19 @@ def _generate_fallback_code(problem_slug: str, question: str, solution_text: str
             blk.append(f"        self.play(FadeOut(step_grp_{pg_num - 1}), run_time=0.4)")
         y = 1.4
         for i, ln in enumerate(pg_lines):
-            col = COLORS[i % len(COLORS)]
+            bullet_col = BULLET_COLORS[i % len(BULLET_COLORS)]
             vname = f"s{pg_num}_{i}"
-            blk.append(f'\n        {vname} = Text("{ln}", font_size=22, color={col})')
-            blk.append(f"        {vname}.move_to(np.array([0, {y:.2f}, 0]))")
-            blk.append(f"        self.play(FadeIn({vname}, shift=RIGHT * 0.2), run_time=0.4)")
-            y -= 0.62
+            bname = f"b{pg_num}_{i}"
+            # Small colored dot bullet + white text side by side
+            blk.append(f'\n        {bname} = Dot(radius=0.07, color={bullet_col}, fill_opacity=1).move_to(np.array([-5.8, {y:.2f}, 0]))')
+            blk.append(f'\n        {vname} = Text("{ln}", font_size=23, color=WHITE)')
+            blk.append(f"        {vname}.move_to(np.array([0.2, {y:.2f}, 0]))")
+            blk.append(f"        self.play(FadeIn({bname}), FadeIn({vname}, shift=RIGHT * 0.15), run_time=0.38)")
+            y -= 0.65
+        grp_vars = ", ".join(
+            f"b{pg_num}_{i}, s{pg_num}_{i}" for i in range(len(pg_lines))
+        )
+        blk.append(f"        step_grp_{pg_num} = VGroup({grp_vars})")
         grp_vars = ", ".join(f"s{pg_num}_{i}" for i in range(len(pg_lines)))
         blk.append(f"        step_grp_{pg_num} = VGroup({grp_vars})")
         page_blocks.append("\n".join(blk))
@@ -580,39 +588,43 @@ import numpy as np
 
 class MathAnimationScene(Scene):
     def construct(self):
+        # Pure black background -- mathematisa dark-elegance style
         bg = Rectangle(width=16, height=9, fill_color=BLACK, fill_opacity=1, stroke_width=0)
         self.add(bg)
 
-        title = Text("Math Solution", font_size=42)
-        title.set_color_by_gradient(YELLOW, ORANGE)
-        title.to_edge(UP, buff=0.28)
-        self.play(Write(title), run_time=1.0)
+        # Gradient title
+        title = Text("Step-by-Step Solution", font_size=44)
+        title.set_color_by_gradient(CYAN, BLUE_B)
+        title.to_edge(UP, buff=0.30)
+        self.play(Write(title), run_time=0.9)
 
-        q_label = Text("{q_safe}", font_size=24)
-        q_label.set_color(BLUE_A)
-        q_label.next_to(title, DOWN, buff=0.3)
-        self.play(FadeIn(q_label, shift=UP * 0.2), run_time=0.7)
+        # Question label
+        q_label = Text("{q_safe}", font_size=26, color=WHITE)
+        q_label.next_to(title, DOWN, buff=0.25)
+        self.play(FadeIn(q_label, shift=UP * 0.15), run_time=0.6)
 
-        sep = Line(LEFT * 6.2, RIGHT * 6.2, color=YELLOW_A, stroke_width=1.5)
-        sep.next_to(q_label, DOWN, buff=0.22)
-        self.play(Create(sep), run_time=0.4)
-        self.wait(0.3)
+        # Thin cyan separator line
+        sep = Line(LEFT * 6.0, RIGHT * 6.0, color=CYAN, stroke_width=1.2)
+        sep.next_to(q_label, DOWN, buff=0.20)
+        self.play(Create(sep), run_time=0.35)
+        self.wait(0.2)
 {steps_code}
 
-        ans_text = Text("{answer_line}", font_size=30)
-        ans_text.set_color_by_gradient(GREEN_A, YELLOW_A)
-        ans_text.to_edge(DOWN, buff=0.6)
+        # Final answer -- gold box, large gradient text
+        ans_text = Text("{answer_line}", font_size=32)
+        ans_text.set_color_by_gradient(TEAL, GREEN_C)
+        ans_text.to_edge(DOWN, buff=0.65)
         ans_box = RoundedRectangle(
-            corner_radius=0.15,
-            width=ans_text.width + 0.8,
-            height=ans_text.height + 0.4,
+            corner_radius=0.14,
+            width=ans_text.width + 0.9,
+            height=ans_text.height + 0.45,
             color=GOLD,
-            stroke_width=2,
+            stroke_width=2.2,
         )
         ans_box.move_to(ans_text)
-        self.play(Create(ans_box), FadeIn(ans_text), run_time=1.0)
-        self.play(Flash(ans_text.get_center(), color=GOLD, flash_radius=0.8), run_time=0.7)
-        self.wait(2.5)
+        self.play(Create(ans_box), FadeIn(ans_text), run_time=0.9)
+        self.play(Flash(ans_text.get_center(), color=GOLD, flash_radius=0.9, line_length=0.3), run_time=0.6)
+        self.wait(5.0)
 """
 
 
@@ -684,6 +696,38 @@ def _ensure_scene_class(code: str) -> str:
     return code
 
 
+def _extract_narration(story_text: str) -> str:
+    """
+    Extract only the NARRATION SCRIPT sentences from a full animation story plan.
+    Handles the case where animation_agent passes the entire scene plan — we parse
+    out just the sentences that a teacher would speak aloud.
+    Returns the input unchanged if no NARRATION SCRIPT section is found.
+    """
+    match = re.search(
+        r'\*{0,2}NARRATION SCRIPT\*{0,2}[^\n]*\n(.*?)(?=\n\*{2}[A-Z]|\Z)',
+        story_text, re.IGNORECASE | re.DOTALL
+    )
+    if not match:
+        return story_text
+
+    block = match.group(1).strip()
+    sentences = []
+    for line in block.split('\n'):
+        line = line.strip()
+        if not line:
+            continue
+        # Skip template placeholders like [sentence 1: ...]
+        if re.match(r'^\[.*\]$', line):
+            continue
+        # Remove leading bullet/dash markers
+        line = re.sub(r'^[-*•]\s*', '', line).strip()
+        if line:
+            sentences.append(line)
+
+    result = ' '.join(sentences)
+    return result if result and not result.startswith('[') else ''
+
+
 async def _narrate_async(text: str, mp3_path: Path) -> bool:
     """Generate TTS narration using edge-tts and save to mp3_path."""
     import edge_tts
@@ -724,36 +768,48 @@ def _merge_audio_video(video: Path, audio: Path, out: Path, ffmpeg_exe: str) -> 
     """Merge narration MP3 into video MP4 using ffmpeg. Returns True on success.
 
     Strategy:
-    - Probe the video duration first, then use -t <duration> to clip output
-      at exactly the video length.  This avoids the -c:v copy + filter_complex
-      + -shortest combination that corrupts the moov atom on Windows.
-    - If audio < video: audio plays for its duration, then silence for remainder.
-    - If audio > video: -t clips audio at video end.
-    - -movflags +faststart writes the moov atom at file start, required for
-      HTML5 browser players.
+    - Probe both video and audio durations.
+    - If audio > video + 0.5s: freeze-extend the last frame using the tpad filter
+      so the narration is never cut off mid-sentence. This is the main fix for
+      the "animation cuts off before narration finishes" bug.
+    - Otherwise: -t video_dur clips output at video length (no freeze needed).
+    - -movflags +faststart writes the moov atom at file start for HTML5 players.
     """
     video_dur = _probe_video_duration(video, ffmpeg_exe)
+    audio_dur = _probe_video_duration(audio, ffmpeg_exe)  # reuse — ffmpeg reads any media
 
-    cmd = [
-        ffmpeg_exe, "-y",
-        "-i", str(video),
-        "-i", str(audio),
-        "-c:v", "copy",
-        "-c:a", "aac",
-        "-b:a", "128k",
-        "-map", "0:v:0",
-        "-map", "1:a:0",
-    ]
-    if video_dur is not None:
-        # Explicit duration cut — no -shortest, no filter_complex.
-        # Audio shorter than video plays to its natural end; browser plays
-        # silence for any remaining video. Audio longer than video is clipped.
-        cmd += ["-t", str(video_dur)]
+    if video_dur and audio_dur and audio_dur > video_dur + 0.5:
+        # Narration outlasts animation: freeze the last frame for the overflow duration
+        extra = audio_dur - video_dur
+        cmd = [
+            ffmpeg_exe, "-y",
+            "-i", str(video),
+            "-i", str(audio),
+            "-filter_complex",
+            f"[0:v]tpad=stop_mode=clone:stop_duration={extra:.3f}[v]",
+            "-map", "[v]",
+            "-map", "1:a:0",
+            "-c:a", "aac",
+            "-b:a", "128k",
+            "-movflags", "+faststart",
+            str(out),
+        ]
     else:
-        # Duration unknown: clip at shorter stream. Accepts the risk that
-        # narration shorter than animation ends the video early.
-        cmd += ["-shortest"]
-    cmd += ["-movflags", "+faststart", str(out)]
+        cmd = [
+            ffmpeg_exe, "-y",
+            "-i", str(video),
+            "-i", str(audio),
+            "-c:v", "copy",
+            "-c:a", "aac",
+            "-b:a", "128k",
+            "-map", "0:v:0",
+            "-map", "1:a:0",
+        ]
+        if video_dur is not None:
+            cmd += ["-t", str(video_dur)]
+        else:
+            cmd += ["-shortest"]
+        cmd += ["-movflags", "+faststart", str(out)]
 
     result = subprocess.run(cmd, capture_output=True, timeout=audio_cfg.merge_timeout)
     return result.returncode == 0 and out.exists() and out.stat().st_size > 10_000
@@ -794,8 +850,9 @@ def run_manim_animation(
                      if the guaranteed fallback was used instead of the creative script)
           - stdout / stderr: command output
     """
-    # Use character-voiced story for narration when available; fall back to solution text
-    _narration_text = narration_script.strip() or solution_text
+    # Extract only the narration sentences from the story plan (strips scene/color descriptions)
+    _narration_raw = _extract_narration(narration_script.strip()) if narration_script.strip() else ""
+    _narration_text = _narration_raw or solution_text
     # 1. Strip markdown fences if present
     clean_code = _extract_code_block(manim_code)
 
@@ -935,6 +992,21 @@ def run_manim_animation(
             pass
         return raw_video
 
+    # Hoisted outside try so it's available in the TimeoutExpired handler too
+    def _latest_mp4(search_root: Path, min_mtime: float = 0.0) -> Path | None:
+        # Manim creates: <media_dir>/videos/<script_stem>/<quality_folder>/MathAnimationScene.mp4
+        # Only accept files created/modified AFTER render_start_time to avoid stale results.
+        if not search_root.exists():
+            return None
+        hits = [
+            p for p in search_root.rglob("MathAnimationScene.mp4")
+            if p.is_file() and p.stat().st_size > 0
+            and p.stat().st_mtime >= min_mtime
+        ]
+        if not hits:
+            return None
+        return sorted(hits, key=lambda p: p.stat().st_mtime)[-1]
+
     try:
         render_start_time = time.time() - 2  # 2-second grace window for filesystem lag
         result = subprocess.run(
@@ -948,23 +1020,6 @@ def run_manim_animation(
 
         stdout = result.stdout
         stderr = result.stderr
-
-        # ── Locate the rendered video ─────────────────────────────────────────
-        # Manim creates: <media_dir>/videos/<script_stem>/<quality_folder>/MathAnimationScene.mp4
-        # We search recursively BUT only accept videos created/modified AFTER
-        # we started this render, so we never accidentally return a stale video
-        # from a previous run.
-        def _latest_mp4(search_root: Path, min_mtime: float = 0.0) -> Path | None:
-            if not search_root.exists():
-                return None
-            hits = [
-                p for p in search_root.rglob("MathAnimationScene.mp4")
-                if p.is_file() and p.stat().st_size > 0
-                and p.stat().st_mtime >= min_mtime
-            ]
-            if not hits:
-                return None
-            return sorted(hits, key=lambda p: p.stat().st_mtime)[-1]
 
         _quality_labels = {"l": "480p15", "m": "720p30", "h": "1080p60", "p": "1440p60", "k": "2160p60"}
         quality_label = _quality_labels.get(quality, quality)
@@ -1115,12 +1170,51 @@ def run_manim_animation(
         }
 
     except subprocess.TimeoutExpired:
+        # Render timed out — immediately try guaranteed text-only fallback so the
+        # animation_agent does NOT retry (which would waste another ~150s + 60s LLM).
+        if solution_text.strip():
+            _fb_code_t = _generate_fallback_code(problem_slug, question, solution_text)
+            _fb_code_t = _sanitize_no_latex(_fb_code_t)
+            _fb_path_t = ANIMATIONS_DIR / f"{slug}_{timestamp}_textonly.py"
+            _fb_path_t.write_text(_fb_code_t, encoding="utf-8")
+            try:
+                subprocess.run(
+                    [
+                        sys.executable, "-m", "manim", "render", "-ql",
+                        "--media_dir", str(media_dir),
+                        str(_fb_path_t), "MathAnimationScene",
+                    ],
+                    capture_output=True, text=True,
+                    timeout=manim_cfg.fallback_render_timeout,
+                    cwd=str(ANIMATIONS_DIR),
+                    env=env,
+                )
+                _fb_video_t = _latest_mp4(media_dir, min_mtime=render_start_time)
+                if _fb_video_t and _fb_video_t.is_file() and _fb_video_t.stat().st_size > 0:
+                    _fb_video_t_path = _finish_with_audio(str(_fb_video_t))
+                    return {
+                        "status": "success",
+                        "video_path": _fb_video_t_path,
+                        "script_path": str(_fb_path_t),
+                        "message": (
+                            f"[FALLBACK VIDEO] Creative render timed out after "
+                            f"{manim_cfg.render_timeout}s ({quality} quality). "
+                            f"A clean text-based solution video was auto-generated.\n"
+                            f"VIDEO SAVED AT: {_fb_video_t}\n"
+                            f"The student can watch the full step-by-step solution now.\n"
+                            f"Do NOT retry — the student already has a complete video."
+                        ),
+                        "stdout": "",
+                        "stderr": "",
+                    }
+            except Exception:
+                pass
         return {
             "status": "error",
             "video_path": None,
             "script_path": str(script_path),
             "message": (
-                f"Animation rendering timed out after {manim_cfg.render_timeout // 60} minutes "
+                f"Animation rendering timed out after {manim_cfg.render_timeout}s "
                 f"(quality={quality}). Set MANIM_QUALITY=l for faster renders."
             ),
             "stdout": "",

@@ -23,12 +23,12 @@ story_agent = LlmAgent(
     name="story_agent",
     model=models.fast,
     description=(
-        "Discovery narrative generator that connects math solutions to real-world "
-        "applications — showing the scientist who discovered it, where it's used today, "
-        "and how the answer maps back to a concrete real-world outcome. Generates "
-        "cinematic 5-act scene-by-scene animation scripts for the animation agent."
+        "Mathematical visual scene planner. Reads the math solution and produces a "
+        "precise 3-scene animation plan: pure math visualization on black background, "
+        "vibrant curves and shapes, step-by-step equations. No stories, no characters, "
+        "no real-world metaphors. Mathematisa-style dark elegance."
     ),
     instruction=_STORY_PREAMBLE + STORY_AGENT_INSTRUCTION,
-    # Store the story in session state so animation_agent reads it via {animation_story}.
+    # Store the scene plan in session state so animation_agent reads it via {animation_story}.
     output_key="animation_story",
 )

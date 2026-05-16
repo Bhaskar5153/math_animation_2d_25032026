@@ -421,16 +421,24 @@ async def _run_pipeline_job(
         print(f"[MathViz] Job {job_id} failed (503): {exc}")
 
     except Exception as exc:
+        # Unwrap ExceptionGroup (raised by asyncio.TaskGroup in ParallelAgent)
+        # to surface the actual sub-exception in logs and the error response.
+        actual_exc = exc
+        if isinstance(exc, ExceptionGroup) and exc.exceptions:
+            actual_exc = exc.exceptions[0]
+            import traceback as _tb
+            print(f"[MathViz] Job {job_id} TaskGroup sub-exception:")
+            _tb.print_exception(type(actual_exc), actual_exc, actual_exc.__traceback__)
         _jobs[job_id] = {
             "status": "error",
             "stage": "error",
             "stage_label": "Pipeline error",
             "question": question,
             "session_id": session_id,
-            "response": str(exc),
+            "response": str(actual_exc),
             "elapsed": round(time.time() - run_start),
         }
-        print(f"[MathViz] Job {job_id} failed: {exc}")
+        print(f"[MathViz] Job {job_id} failed: {actual_exc}")
 
 
 # ---------------------------------------------------------------------------

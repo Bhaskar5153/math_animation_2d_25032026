@@ -64,9 +64,13 @@ ANIMATION_AGENT_FULL_INSTRUCTION = (
    - `problem_slug`: a short slug derived from the question (no spaces, max 30 chars)
    - `question`: the exact original math/physics question (copy it verbatim)
    - `solution_text`: the full step-by-step solution text (copy the complete solution from INPUTS above)
-   - `narration_script`: the full ANIMATION STORY text (copy it verbatim from INPUTS above)
+   - `narration_script`: ONLY the sentences from the **NARRATION SCRIPT** section of the
+     ANIMATION STORY. Extract those 4-6 sentences only. Do NOT copy scene plans, visual
+     descriptions, colors, font sizes, or Manim object names — those must NOT appear in
+     the audio. The narration must sound like a teacher explaining math at a chalkboard,
+     not a script reader describing screen elements.
    CRITICAL: Always pass `question`, `solution_text`, and `narration_script`. The narration_script
-   makes the audio sound like the story characters are talking, not reading equations.
+   is spoken aloud over the video — it must contain only plain teaching sentences.
    solution_text enables the automatic guaranteed fallback video if your creative script fails.
 
    ⚠ MANDATORY: Step 4 is a FUNCTION CALL, not text output. Your next action after
@@ -95,7 +99,8 @@ ANIMATION_AGENT_FULL_INSTRUCTION = (
 - [ ] `pose=` matches the story moment: "thinking" (pondering), "excited" (eureka), "explaining" (pointing), "neutral" (resting). CHANGE pose between acts so body language tells the story.
 - [ ] Physics / projectile / sports problems: athlete character uses `make_athlete(shirt_color=BLUE_C, scale=0.6)` at FAR LEFT -- NOT a plain human or emoji.
 - [ ] `make_human()` parameters are `shirt_color=`, `emotion=`, `pose=` -- all three are available.
-- [ ] construct() ends with `self.wait(3.0)` as the VERY LAST line -- required for audio sync.
+- [ ] construct() ends with `self.wait(5.0)` as the VERY LAST line -- required for audio sync. Use 5.0 minimum so narration finishes before the video ends.
+- [ ] **Line() takes EXACTLY 2 points**: `Line(start, end)` ONLY. NEVER `Line(p1, p2, p3)` -- passing 3 points crashes with `ValueError: truth value of array`. Use `Polygon(p1, p2, p3)` for triangles.
 - [ ] **VARIABLE GUARD**: scan construct() top-to-bottom -- every name you USE must have been ASSIGNED on an earlier line. E.g. if you write `label.move_to(r_part)`, check `r_part = ...` exists above it. Missing assignments are the #1 cause of NameError crashes.
 - [ ] **INDEX GUARD**: before writing `group[N]`, count the elements added to `group` -- it must have at least N+1 items. `IndexError: list index out of range` is the #2 cause of crashes.
 - [ ] **NO funky/joke code comments** -- only short functional section headers like `# --- Act 1 ---`
@@ -112,27 +117,37 @@ ANIMATION_AGENT_FULL_INSTRUCTION = (
   - [ ] Characters: biologist (make_human TEAL) at LEFT edge; robot at RIGHT edge
   - [ ] Biologist starts pose="thinking" (both arms move); switches to pose="excited" after answer
 - [ ] Physics/Projectile MOTION checklist (if problem asks for Hmax / T / R from angled launch):
-  - [ ] Stadium background: dark blue sky Rectangle + green grass Rectangle (NOT plain black bg)
+  - [ ] Stadium background: dark blue sky Rectangle + green grass Rectangle (exception to the pure black rule -- stadium scenes need sky color)
   - [ ] make_athlete(shirt_color=BLUE_C, scale=0.6) at FAR LEFT edge (x < -5.5) -- NOT center; ball is the hero
   - [ ] Dashed parabolic arc via ParametricFunction + proj_pt() mapping (use PROJECTILE MOTION helper)
   - [ ] Ball animates along arc via ValueTracker t_trk (run_time=3.0, rate_func=smooth)
   - [ ] Three velocity vectors at launch: u (white diagonal), ux (teal horizontal), uy (orange vertical)
   - [ ] Dashed vertical line at peak + "Hmax" label + "vy=0 at peak" label
   - [ ] Flash() on landing; three gold answer boxes side by side: Hmax | T | R
+- [ ] **GEOMETRY / DISTANCE FORMULA** checklist (if problem asks for distance between two points):
+  - [ ] SPLIT LAYOUT: axes on LEFT half (shift LEFT*2.5 + DOWN*0.9), equations on RIGHT half (x > 1.5). NEVER full-width axes.
+  - [ ] Axes x_range and y_range clipped to just contain both points + padding 1.5. x_length=5.8, y_length=5.5 (short height keeps dots below title zone).
+  - [ ] EDGE-SAFE labels: P1 near left edge → `lbl1.next_to(dot1, RIGHT, buff=0.14)`. P2 near right edge → `lbl2.next_to(dot2, LEFT, buff=0.14)`. NEVER place label in the direction that goes off-screen.
+  - [ ] BOUNCING BALL: `Circle(radius=0.18, color=YELLOW)` rolls from P1 to P2 via ValueTracker + perp_dir bounce (4 bouncing arcs, decaying height). `self.play(Create(dist_line), t_ball.animate.set_value(1.0), run_time=2.5, rate_func=linear)`. Flash + Transform ball→dot2 at landing.
+  - [ ] Right-angle legs: `DashedLine(P1, corner)` + `DashedLine(corner, P2)` in TEAL. Δx label BELOW h_leg (DOWN buff=0.10), Δy label LEFT of v_leg (LEFT buff=0.10) — both INSIDE the triangle.
+  - [ ] Equation stack: font_size=25 for all steps (prevents overflow). `VGroup.arrange(DOWN, buff=0.38, aligned_edge=LEFT).move_to(RIGHT*2.8 + UP*0.8)`. Answer font_size=38 below stack.
 - [ ] Physics: sphere PHYSICALLY MOVES with roll_sphere(); force arrows in RED/GREEN_C/ORANGE/YELLOW
 - [ ] Physics: force arrow labels each placed with next_to(arrow.get_end(), direction, buff=0.12)
 - [ ] Physics: incline shifted LEFT*1.5 so right half of screen is free for equations
 - [ ] Physics: equations colour-coded to match their force arrow colour
 - [ ] Physics: energy bars animate from zero (BLUE_C=KE_trans, TEAL=KE_rot, ORANGE=PE)
-- [ ] Gradient background added first; every title/equation uses `.set_color_by_gradient()`
+- [ ] **PURE BLACK BACKGROUND** -- always: `bg = Rectangle(width=16, height=9, fill_color=BLACK, fill_opacity=1); self.add(bg)`. NEVER use a colored or gradient background rectangle.
+- [ ] **TITLE** -- large gradient text at top: `title.set_color_by_gradient(...)` using the domain palette from the VISUAL STYLE section. font_size ≥ 48.
+- [ ] **CHARACTERS** -- PURE CONCEPT animations (trig graphs, infinite series, integrals, limits, Fourier, parametric curves, number theory visualizations): **NO characters**. The math IS the visual. For word problems only, characters go at screen edges.
 - [ ] Characters at screen EDGES ONLY (x < -4.5 LEFT or x > 4.5 RIGHT) -- NEVER over equations
 - [ ] Physics character: scale=0.55, pinned at x > 5.5 or x < -5.5
 - [ ] Layout: Title at y > 3.0, equations at centre, characters at edges
+- [ ] Title and equations use `.set_color_by_gradient()` matching the domain palette
 - [ ] `FadeOut(Group(*self.mobjects))` between acts -- **never** `VGroup(*self.mobjects)`
-- [ ] At least 2 amusing moments (panic wiggle, wrong-answer crash, happy jump)
+- [ ] At least 2 amusing moments (panic wiggle, wrong-answer crash, happy jump) -- for word problems only; skip for pure concept animations
 - [ ] Confetti + Flash + gold SurroundingRectangle at the final answer reveal
 - [ ] Total estimated animation time is 60-120 seconds
-- [ ] Ends with the FINAL ANSWER in rainbow gradient, clearly displayed and boxed in gold
+- [ ] Ends with the FINAL ANSWER in gradient color matching the domain, clearly displayed and boxed in gold
 
 ## Retry Logic -- MANDATORY on error
 If `run_manim_animation` returns `status == 'error'`:
@@ -140,6 +155,7 @@ If `run_manim_animation` returns `status == 'error'`:
 2. Identify the root cause from the error type:
    - `NameError: name 'X' is not defined` -> find where `X` is first USED, add `X = ORIGIN` (or the correct Manim object) BEFORE that line. Do not remove the usage -- fix the missing definition.
    - `IndexError: list index out of range` -> a VGroup/list has fewer elements than you're accessing. Either add more elements to the group before that line, or reduce the index. Check how many `.add()` calls or list items precede the subscript.
+   - `ValueError: The truth value of an array with more than one element is ambiguous` -> you called `Line(p1, p2, p3)` with 3 points. `Line()` takes EXACTLY 2 points (start, end). Change to `Polygon(p1, p2, p3, fill_color=..., fill_opacity=..., stroke_width=0)` for a filled triangle.
    - `TypeError: Mobject.__init__() got an unexpected keyword argument 'corner_radius'` -> replace with `RoundedRectangle(..., corner_radius=...)`.
    - `AttributeError: ... has no attribute 'rotate'` -> replace `DIRECTION.copy().rotate(a)` with `np.array([np.cos(a), np.sin(a), 0])`
    - `TypeError: getter() takes 1 positional argument` -> you used a MathTex method on a Text/Mobject -- rewrite using Transform between two Text objects
