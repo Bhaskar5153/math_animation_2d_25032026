@@ -216,9 +216,16 @@ def _sanitize_no_latex(code: str) -> str:
     # 2. Replace standalone Tex( → Text(  (avoid touching Vertex, Complex…)
     code = re.sub(r"(?<![A-Za-z])Tex\s*\(", "Text(", code)
 
-    # 3. Remove MathTex-only keyword arguments (won't exist on Text)
+    # 3. Replace TransformMatchingTex/TransformMatchingShapes → Transform
+    #    These require MathTex objects; using them with Text crashes or produces
+    #    garbage.  Plain Transform is always safe with Text.
+    code = re.sub(r"\bTransformMatchingTex\b", "Transform", code)
+    code = re.sub(r"\bTransformMatchingShapes\b", "Transform", code)
+
+    # 3b. Remove MathTex-only / transform-matching-only keyword arguments
     for kwarg in ("substrings_to_isolate", "tex_environment", "tex_template",
-                  "arg_separator"):
+                  "arg_separator", "transform_mismatched_size", "key_map",
+                  "transform_mismatches"):
         code = re.sub(r",?\s*" + kwarg + r"\s*=\s*(?:[^,)\n]+)", "", code)
 
     # 4a. Remove entire assignment lines whose RHS uses a forbidden method.
@@ -522,110 +529,165 @@ def _sanitize_no_latex(code: str) -> str:
     return code
 
 
-# ---------------------------------------------------------------------------
-# Guaranteed fallback animation generator
-# ---------------------------------------------------------------------------
-
-def _generate_fallback_code(problem_slug: str, question: str, solution_text: str) -> str:
+def _generate_visual_fallback_code(problem_slug: str, question: str, solution_text: str) -> str:
     """
-    Generate a minimal, guaranteed-to-render text-based Manim animation.
-    Used automatically when the LLM's creative script fails to render.
-    Displays the question and every solution step as animated on-screen text,
-    finishing with the final answer boxed in gold.
-    Uses ONLY the most basic Manim primitives — nothing that can crash.
+    Generate a 2D VISUAL fallback animation (NOT text-only).
+    LEFT half: relevant geometric/mathematical shape based on problem type.
+    RIGHT half: solution steps as animated colored text.
+    Guaranteed to render — uses only basic Manim primitives.
     """
-    def _safe(s: str, maxlen: int = 72) -> str:
-        """Escape text for safe embedding inside a Python double-quoted string."""
+    def _safe(s: str, maxlen: int = 62) -> str:
         s = s.replace("\\", "\\\\").replace('"', '\\"').replace("\n", " ").strip()
-        s = re.sub(r"[\x00-\x1f\x7f-\x9f]", " ", s)   # strip control chars
+        s = re.sub(r"[\x00-\x1f\x7f-\x9f{}]", " ", s)
         return s[:maxlen]
 
-    q_safe = _safe(question, 80) or "Math Problem"
+    q_safe = _safe(question, 68) or "Math Problem"
+    raw_lines = [ln.strip() for ln in (solution_text or question).splitlines() if ln.strip()][:18]
+    step_lines = [_safe(ln, 58) for ln in raw_lines] or ["See problem statement above."]
+    answer_line = step_lines[-1]
 
-    # Split solution into non-empty lines, cap at 24 to avoid overflow
-    raw_lines = [ln.strip() for ln in solution_text.splitlines() if ln.strip()][:24]
-    step_lines = [_safe(ln, 72) for ln in raw_lines] or ["Solution not available."]
-    answer_line = step_lines[-1]   # last line is treated as the final answer
+    q_lower = question.lower()
+    is_tri = any(w in q_lower for w in ["triangle", "parallel", "similar", "bpt", "altitude", "median", "bisect", "abc", "pqr"])
+    is_circ = any(w in q_lower for w in ["circle", "radius", "diameter", "arc", "chord", "circumference", "tangent"])
+    is_trig = any(w in q_lower for w in ["sin", "cos", "tan", "trig", "secant", "cosec"])
+    is_rect = any(w in q_lower for w in ["rectangle", "square", "perimeter", "cube", "cuboid"])
 
-    # Group steps into pages of 5 lines so they fit vertically on screen
-    PAGE = 5
-    pages = [step_lines[i : i + PAGE] for i in range(0, len(step_lines), PAGE)]
-    # Alternating bullet colors on black (mathematisa-inspired: white body, cyan accent)
-    BULLET_COLORS = ["CYAN", "TEAL", "CYAN", "GREEN_C", "TEAL"]
-
-    page_blocks: list[str] = []
-    for pg_num, pg_lines in enumerate(pages):
-        blk: list[str] = []
-        if pg_num > 0:
-            blk.append(f"\n        self.wait(0.8)")
-            blk.append(f"        self.play(FadeOut(step_grp_{pg_num - 1}), run_time=0.4)")
-        y = 1.4
-        for i, ln in enumerate(pg_lines):
-            bullet_col = BULLET_COLORS[i % len(BULLET_COLORS)]
-            vname = f"s{pg_num}_{i}"
-            bname = f"b{pg_num}_{i}"
-            # Small colored dot bullet + white text side by side
-            blk.append(f'\n        {bname} = Dot(radius=0.07, color={bullet_col}, fill_opacity=1).move_to(np.array([-5.8, {y:.2f}, 0]))')
-            blk.append(f'\n        {vname} = Text("{ln}", font_size=23, color=WHITE)')
-            blk.append(f"        {vname}.move_to(np.array([0.2, {y:.2f}, 0]))")
-            blk.append(f"        self.play(FadeIn({bname}), FadeIn({vname}, shift=RIGHT * 0.15), run_time=0.38)")
-            y -= 0.65
-        grp_vars = ", ".join(
-            f"b{pg_num}_{i}, s{pg_num}_{i}" for i in range(len(pg_lines))
+    if is_tri:
+        left_visual = """\
+        A = np.array([-4.5, 2.0, 0])
+        B = np.array([-6.2, -1.0, 0])
+        C = np.array([-2.4, -1.0, 0])
+        big_tri = Polygon(A, B, C, stroke_color=BLUE_C, stroke_width=2.5, fill_color=BLUE_E, fill_opacity=0.18)
+        t_glow = big_tri.copy().scale(1.06)
+        t_glow.set_stroke(BLUE_B, width=8, opacity=0.15).set_fill(opacity=0)
+        t_ratio = 0.42
+        D = A + t_ratio * (B - A)
+        E = A + t_ratio * (C - A)
+        de_line = Line(D, E, color=YELLOW, stroke_width=2.2)
+        de_glow = de_line.copy().set_stroke(YELLOW, width=7, opacity=0.18)
+        lbl_A = Text("A", font_size=22, color=WHITE).next_to(A, UP, buff=0.1)
+        lbl_B = Text("B", font_size=22, color=WHITE).next_to(B, DL, buff=0.1)
+        lbl_C = Text("C", font_size=22, color=WHITE).next_to(C, DR, buff=0.1)
+        lbl_D = Text("D", font_size=20, color=YELLOW).next_to(D, LEFT, buff=0.12)
+        lbl_E = Text("E", font_size=20, color=YELLOW).next_to(E, RIGHT, buff=0.12)
+        par_note = Text("DE || BC", font_size=20, color=YELLOW).move_to(np.array([-4.3, -1.6, 0]))
+        self.play(Create(t_glow), Create(big_tri), run_time=1.4)
+        self.play(FadeIn(lbl_A), FadeIn(lbl_B), FadeIn(lbl_C), run_time=0.6)
+        self.play(Create(de_glow), Create(de_line), run_time=0.8)
+        self.play(FadeIn(lbl_D), FadeIn(lbl_E), FadeIn(par_note), run_time=0.7)
+        self.wait(1.5)"""
+    elif is_circ:
+        left_visual = """\
+        cx = np.array([-4.2, 0.0, 0])
+        circ = Circle(radius=1.7, stroke_color=CYAN, stroke_width=2.5, fill_color=TEAL_E, fill_opacity=0.18)
+        circ.move_to(cx)
+        c_glow = circ.copy().scale(1.06).set_stroke(CYAN, width=8, opacity=0.15).set_fill(opacity=0)
+        ctr_dot = Dot(cx, color=GOLD, radius=0.09)
+        r_end = cx + np.array([1.7, 0, 0])
+        r_line = Line(cx, r_end, color=GOLD, stroke_width=2)
+        r_lbl = Text("r", font_size=24, color=GOLD).next_to(r_line.get_center(), UP, buff=0.1)
+        self.play(Create(c_glow), Create(circ), run_time=1.4)
+        self.play(FadeIn(ctr_dot), Create(r_line), FadeIn(r_lbl), run_time=0.8)
+        self.wait(1.5)"""
+    elif is_trig:
+        left_visual = """\
+        cx = np.array([-4.5, 0.0, 0])
+        uc = Circle(radius=1.5, stroke_color=CYAN, stroke_width=2, fill_color=BLACK, fill_opacity=0.5)
+        uc.move_to(cx)
+        h_ax = Line(cx + LEFT * 1.8, cx + RIGHT * 1.8, color=GRAY_B, stroke_width=1.5)
+        v_ax = Line(cx + DOWN * 1.8, cx + UP * 1.8, color=GRAY_B, stroke_width=1.5)
+        ang = 60 * np.pi / 180
+        pt = cx + np.array([1.5 * np.cos(ang), 1.5 * np.sin(ang), 0])
+        r_line = Line(cx, pt, color=GOLD, stroke_width=2)
+        pt_dot = Dot(pt, color=GOLD, radius=0.1)
+        cos_line = Line(cx, np.array([pt[0], cx[1], 0]), color=TEAL, stroke_width=1.5)
+        sin_line = Line(np.array([pt[0], cx[1], 0]), pt, color=PINK, stroke_width=1.5)
+        self.play(Create(h_ax), Create(v_ax), Create(uc), run_time=1.2)
+        self.play(Create(r_line), Create(pt_dot), run_time=0.8)
+        self.play(Create(cos_line), Create(sin_line), run_time=0.8)
+        self.wait(1.5)"""
+    elif is_rect:
+        left_visual = """\
+        rect = Rectangle(width=3.6, height=2.4, stroke_color=GREEN_C, stroke_width=2.5, fill_color=GREEN_E, fill_opacity=0.18)
+        rect.move_to(np.array([-4.2, 0.0, 0]))
+        r_glow = rect.copy().scale(1.06).set_stroke(GREEN_C, width=8, opacity=0.15).set_fill(opacity=0)
+        w_lbl = Text("w", font_size=22, color=GREEN_C).next_to(rect, DOWN, buff=0.15)
+        h_lbl = Text("h", font_size=22, color=GREEN_C).next_to(rect, RIGHT, buff=0.15)
+        self.play(Create(r_glow), Create(rect), run_time=1.4)
+        self.play(FadeIn(w_lbl), FadeIn(h_lbl), run_time=0.7)
+        self.wait(1.5)"""
+    else:
+        left_visual = """\
+        axes = Axes(
+            x_range=[-3, 3, 1], y_range=[-2, 3, 1],
+            x_length=5.2, y_length=4.2,
+            axis_config={"color": GRAY_B, "stroke_width": 1.5, "include_ticks": False},
         )
-        blk.append(f"        step_grp_{pg_num} = VGroup({grp_vars})")
-        grp_vars = ", ".join(f"s{pg_num}_{i}" for i in range(len(pg_lines)))
-        blk.append(f"        step_grp_{pg_num} = VGroup({grp_vars})")
-        page_blocks.append("\n".join(blk))
+        axes.shift(LEFT * 3.2 + DOWN * 0.3)
+        curve = axes.plot(lambda x: 0.35 * x ** 2 - 0.5, x_range=[-2.6, 2.6, 0.05], color=CYAN, stroke_width=2.5)
+        c_glow = curve.copy().set_stroke(CYAN, width=7, opacity=0.18)
+        peak_dot = Dot(axes.c2p(0, -0.5), color=GOLD, radius=0.12)
+        self.play(Create(axes), run_time=1.0)
+        self.play(Create(c_glow), Create(curve), run_time=1.5)
+        self.play(FadeIn(peak_dot), run_time=0.5)
+        self.wait(1.0)"""
+
+    # Right-half solution steps
+    PAGE = 5
+    pages = [step_lines[i: i + PAGE] for i in range(0, len(step_lines), PAGE)]
+    COLORS = ["CYAN", "TEAL", "GREEN_C", "YELLOW", "ORANGE"]
+    step_blocks: list[str] = []
+    for pg_i, pg_lines in enumerate(pages):
+        blk: list[str] = []
+        if pg_i > 0:
+            blk.append(f"        self.wait(0.5)")
+            blk.append(f"        self.play(FadeOut(steps_{pg_i - 1}), run_time=0.4)")
+        items: list[str] = []
+        for j, ln in enumerate(pg_lines):
+            col = COLORS[j % len(COLORS)]
+            vname = f"s{pg_i}_{j}"
+            blk.append(f'        {vname} = Text("{ln}", font_size=25, color={col})')
+            items.append(vname)
+        grp = f"steps_{pg_i}"
+        up_shift = round(0.5 + (len(pg_lines) - 1) * 0.15, 2)
+        rt = round(min(len(pg_lines) * 0.45, 2.2), 1)
+        blk.append(f"        {grp} = VGroup({', '.join(items)}).arrange(DOWN, buff=0.32, aligned_edge=LEFT)")
+        blk.append(f"        {grp}.move_to(RIGHT * 2.8 + UP * {up_shift})")
+        blk.append(f"        self.play(LaggedStart(*[FadeIn(s, shift=LEFT * 0.1) for s in {grp}], lag_ratio=0.25), run_time={rt})")
+        step_blocks.append("\n".join(blk))
 
     last_pg = len(pages) - 1
-    fade_last = f"\n        self.wait(0.5)\n        self.play(FadeOut(step_grp_{last_pg}), run_time=0.4)"
-    steps_code = "\n".join(page_blocks) + fade_last
+    steps_code = "\n".join(step_blocks)
+    steps_code += f"\n        self.wait(1.5)"
+    steps_code += f"\n        self.play(FadeOut(steps_{last_pg}), run_time=0.4)"
 
-    return f"""\
-from manim import *
-import numpy as np
-
-class MathAnimationScene(Scene):
-    def construct(self):
-        # Pure black background -- mathematisa dark-elegance style
-        bg = Rectangle(width=16, height=9, fill_color=BLACK, fill_opacity=1, stroke_width=0)
-        self.add(bg)
-
-        # Gradient title
-        title = Text("Step-by-Step Solution", font_size=44)
-        title.set_color_by_gradient(CYAN, BLUE_B)
-        title.to_edge(UP, buff=0.30)
-        self.play(Write(title), run_time=0.9)
-
-        # Question label
-        q_label = Text("{q_safe}", font_size=26, color=WHITE)
-        q_label.next_to(title, DOWN, buff=0.25)
-        self.play(FadeIn(q_label, shift=UP * 0.15), run_time=0.6)
-
-        # Thin cyan separator line
-        sep = Line(LEFT * 6.0, RIGHT * 6.0, color=CYAN, stroke_width=1.2)
-        sep.next_to(q_label, DOWN, buff=0.20)
-        self.play(Create(sep), run_time=0.35)
-        self.wait(0.2)
-{steps_code}
-
-        # Final answer -- gold box, large gradient text
-        ans_text = Text("{answer_line}", font_size=32)
-        ans_text.set_color_by_gradient(TEAL, GREEN_C)
-        ans_text.to_edge(DOWN, buff=0.65)
-        ans_box = RoundedRectangle(
-            corner_radius=0.14,
-            width=ans_text.width + 0.9,
-            height=ans_text.height + 0.45,
-            color=GOLD,
-            stroke_width=2.2,
-        )
-        ans_box.move_to(ans_text)
-        self.play(Create(ans_box), FadeIn(ans_text), run_time=0.9)
-        self.play(Flash(ans_text.get_center(), color=GOLD, flash_radius=0.9, line_length=0.3), run_time=0.6)
-        self.wait(5.0)
-"""
+    return (
+        "from manim import *\n"
+        "import numpy as np\n\n"
+        "class MathAnimationScene(Scene):\n"
+        "    def construct(self):\n"
+        "        bg = Rectangle(width=16, height=9, fill_color=BLACK, fill_opacity=1, stroke_width=0)\n"
+        "        self.add(bg)\n\n"
+        "        title = Text(\"" + q_safe + "\", font_size=30)\n"
+        "        title.set_color_by_gradient(CYAN, BLUE_B)\n"
+        "        title.to_edge(UP, buff=0.28)\n"
+        "        sep = Line(LEFT * 6.5, RIGHT * 6.5, color=CYAN, stroke_width=1.0)\n"
+        "        sep.next_to(title, DOWN, buff=0.20)\n"
+        "        vert_div = DashedLine(UP * 3.5, DOWN * 3.5, color=GRAY_D, stroke_width=0.8)\n"
+        "        self.play(Write(title), run_time=0.9)\n"
+        "        self.play(Create(sep), FadeIn(vert_div), run_time=0.4)\n\n"
+        + "\n".join("        " + ln if ln and not ln.startswith("        ") else ln for ln in left_visual.split("\n"))
+        + "\n\n"
+        + steps_code + "\n\n"
+        "        ans = Text(\"" + answer_line + "\", font_size=34)\n"
+        "        ans.set_color_by_gradient(TEAL, GREEN_C)\n"
+        "        ans.to_edge(DOWN, buff=0.50)\n"
+        "        ans_box = RoundedRectangle(corner_radius=0.14, width=ans.width + 0.9, height=ans.height + 0.45, color=GOLD, stroke_width=2.2)\n"
+        "        ans_box.move_to(ans)\n"
+        "        self.play(Create(ans_box), FadeIn(ans), run_time=0.9)\n"
+        "        self.play(Flash(ans.get_center(), color=GOLD, flash_radius=0.9, line_length=0.3), run_time=0.6)\n"
+        "        self.wait(5.0)\n"
+    )
 
 
 def _extract_error_context(stderr: str, script_path: str, code: str) -> str:
@@ -764,33 +826,79 @@ def _probe_video_duration(video: Path, ffmpeg_exe: str) -> float | None:
     return None
 
 
+def _build_atempo_chain(tempo: float) -> str:
+    """Build an ffmpeg atempo filter chain for arbitrary tempo ratios.
+
+    atempo must stay in [0.5, 2.0] per stage, so chain multiple stages
+    for more extreme ratios.  tempo > 1 speeds audio up (shorter); < 1 slows down.
+    """
+    if 0.5 <= tempo <= 2.0:
+        return f"atempo={tempo:.4f}"
+    filters: list[str] = []
+    t = tempo
+    while t > 2.0:
+        filters.append("atempo=2.0000")
+        t /= 2.0
+    while t < 0.5:
+        filters.append("atempo=0.5000")
+        t *= 2.0
+    if abs(t - 1.0) > 0.001:
+        filters.append(f"atempo={t:.4f}")
+    return ",".join(filters) if filters else "atempo=1.0000"
+
+
 def _merge_audio_video(video: Path, audio: Path, out: Path, ffmpeg_exe: str) -> bool:
     """Merge narration MP3 into video MP4 using ffmpeg. Returns True on success.
 
-    Strategy:
-    - Probe both video and audio durations.
-    - If audio > video + 0.5s: freeze-extend the last frame using the tpad filter
-      so the narration is never cut off mid-sentence. This is the main fix for
-      the "animation cuts off before narration finishes" bug.
-    - Otherwise: -t video_dur clips output at video length (no freeze needed).
+    Strategy: stretch/compress audio to exactly match the video duration via atempo.
+    - Probe both durations; compute tempo ratio = audio_dur / video_dur.
+    - Apply atempo chain so every narration word lands within the video window.
+    - Ratios within ±3% are left unchanged (avoids audible quality loss for near-matches).
+    - If probing fails, fall back to -shortest.
     - -movflags +faststart writes the moov atom at file start for HTML5 players.
     """
     video_dur = _probe_video_duration(video, ffmpeg_exe)
-    audio_dur = _probe_video_duration(audio, ffmpeg_exe)  # reuse — ffmpeg reads any media
+    audio_dur = _probe_video_duration(audio, ffmpeg_exe)  # same ffmpeg -i probe works for MP3
 
-    if video_dur and audio_dur and audio_dur > video_dur + 0.5:
-        # Narration outlasts animation: freeze the last frame for the overflow duration
-        extra = audio_dur - video_dur
+    if video_dur is not None and audio_dur is not None and audio_dur > 0:
+        tempo = audio_dur / video_dur   # >1 = audio too long (speed up); <1 = audio too short (slow down)
+        use_atempo = abs(tempo - 1.0) > 0.03   # only apply if diff > 3%
+
+        if use_atempo:
+            atempo_filter = _build_atempo_chain(tempo)
+            cmd = [
+                ffmpeg_exe, "-y",
+                "-i", str(video),
+                "-i", str(audio),
+                "-c:v", "copy",
+                "-af", atempo_filter,
+                "-c:a", "aac", "-b:a", "128k",
+                "-map", "0:v:0", "-map", "1:a:0",
+                "-t", f"{video_dur:.3f}",
+                "-movflags", "+faststart",
+                str(out),
+            ]
+        else:
+            cmd = [
+                ffmpeg_exe, "-y",
+                "-i", str(video),
+                "-i", str(audio),
+                "-c:v", "copy",
+                "-c:a", "aac", "-b:a", "128k",
+                "-map", "0:v:0", "-map", "1:a:0",
+                "-t", f"{video_dur:.3f}",
+                "-movflags", "+faststart",
+                str(out),
+            ]
+    elif video_dur is not None:
         cmd = [
             ffmpeg_exe, "-y",
             "-i", str(video),
             "-i", str(audio),
-            "-filter_complex",
-            f"[0:v]tpad=stop_mode=clone:stop_duration={extra:.3f}[v]",
-            "-map", "[v]",
-            "-map", "1:a:0",
-            "-c:a", "aac",
-            "-b:a", "128k",
+            "-c:v", "copy",
+            "-c:a", "aac", "-b:a", "128k",
+            "-map", "0:v:0", "-map", "1:a:0",
+            "-t", f"{video_dur:.3f}",
             "-movflags", "+faststart",
             str(out),
         ]
@@ -800,16 +908,12 @@ def _merge_audio_video(video: Path, audio: Path, out: Path, ffmpeg_exe: str) -> 
             "-i", str(video),
             "-i", str(audio),
             "-c:v", "copy",
-            "-c:a", "aac",
-            "-b:a", "128k",
-            "-map", "0:v:0",
-            "-map", "1:a:0",
+            "-c:a", "aac", "-b:a", "128k",
+            "-map", "0:v:0", "-map", "1:a:0",
+            "-shortest",
+            "-movflags", "+faststart",
+            str(out),
         ]
-        if video_dur is not None:
-            cmd += ["-t", str(video_dur)]
-        else:
-            cmd += ["-shortest"]
-        cmd += ["-movflags", "+faststart", str(out)]
 
     result = subprocess.run(cmd, capture_output=True, timeout=audio_cfg.merge_timeout)
     return result.returncode == 0 and out.exists() and out.stat().st_size > 10_000
@@ -957,10 +1061,14 @@ def run_manim_animation(
     env["PATH"] = os.pathsep.join(path_parts)
     ffmpeg_exe = _shutil.which("ffmpeg", path=env["PATH"]) or "ffmpeg"
 
+    # ── Detect 3D code so we can use a longer render timeout ─────────────────
+    _is_3d_render = "ThreeDScene" in clean_code or "Surface(" in clean_code
+    _effective_timeout = manim_cfg.render_timeout_3d if _is_3d_render else manim_cfg.render_timeout
+
     # ── Start TTS concurrently with the Manim render ──────────────────────────
-    # TTS takes ~30-45 s; the Manim render takes ~90 s.  By submitting TTS to a
+    # TTS takes ~10-20 s; the Manim render takes ~60-90 s.  By submitting TTS to a
     # background thread NOW, the audio file is ready before the render finishes,
-    # so the merge step is immediate.  Saves ~35-45 s on every animation.
+    # so the merge step is immediate.  Saves ~15-20 s on every animation.
     _tts_pool: concurrent.futures.ThreadPoolExecutor | None = None
     _tts_future: "concurrent.futures.Future[bool] | None" = None
     _mp3_path: Path | None = None
@@ -1013,7 +1121,7 @@ def run_manim_animation(
             cmd,
             capture_output=True,
             text=True,
-            timeout=manim_cfg.render_timeout,
+            timeout=_effective_timeout,
             cwd=str(ANIMATIONS_DIR),   # manim.cfg is here; default media/ lands here too
             env=env,
         )
@@ -1047,59 +1155,56 @@ def run_manim_animation(
 
         if result.returncode != 0:
             error_summary = _extract_error_context(stderr, str(script_path), clean_code)
-
-            # ── GUARANTEED FALLBACK VIDEO ─────────────────────────────────────────
-            # If solution_text was supplied, auto-render a safe text-only animation
-            # so the student ALWAYS gets a video, no matter what the LLM code does.
-            if solution_text.strip():
-                _fb_code = _generate_fallback_code(problem_slug, question, solution_text)
-                _fb_code = _sanitize_no_latex(_fb_code)
-                _fb_path = ANIMATIONS_DIR / f"{slug}_{timestamp}_textonly.py"
-                _fb_path.write_text(_fb_code, encoding="utf-8")
+            _is_3d = "ThreeDScene" in clean_code or "Surface(" in clean_code
+            _3d_hint = (
+                "\n\n[3D_RETRY] ThreeDScene/Surface crashed. Fix the 3D code:\n"
+                "  - ALL Text() in ThreeDScene MUST call self.add_fixed_in_frame_mobjects(text) immediately after creation\n"
+                "  - Use self.set_camera_orientation(phi=70*DEGREES, theta=-50*DEGREES) before adding objects\n"
+                "  - Never use MathTex in ThreeDScene — use Text() only\n"
+                "  - Reduce Surface resolution (fewer u/v steps) to avoid memory errors\n"
+                "Only fall back to 2D Scene if the 3D error cannot be fixed."
+            ) if _is_3d else ""
+            # ── Auto-fallback: 2D visual animation (shapes + steps) ─────────
+            if question:
                 try:
-                    _fb_proc = subprocess.run(
-                        [
-                            sys.executable, "-m", "manim", "render", "-ql",
-                            # Fallback is text-only: low quality renders in ~15s
-                            # vs 5-8 min at 1080p — no need to re-punish the user
-                            "--media_dir", str(media_dir),
-                            str(_fb_path), "MathAnimationScene",
-                        ],
+                    _fb_code = _generate_visual_fallback_code(problem_slug, question, solution_text)
+                    _fb_path = ANIMATIONS_DIR / (slug + "_" + timestamp + "_visual2d.py")
+                    _fb_path.write_text(_fb_code, encoding="utf-8")
+                    _fb_start = time.time() - 2
+                    subprocess.run(
+                        [sys.executable, "-m", "manim", "render", "-q" + quality,
+                         "--media_dir", str(media_dir),
+                         str(_fb_path), "MathAnimationScene"],
                         capture_output=True, text=True,
                         timeout=manim_cfg.fallback_render_timeout,
-                        cwd=str(ANIMATIONS_DIR),
-                        env=env,
+                        cwd=str(ANIMATIONS_DIR), env=env,
                     )
-                    _fb_video = _latest_mp4(media_dir, min_mtime=render_start_time)
-                    if _fb_video and _fb_video.is_file() and _fb_video.stat().st_size > 0:
-                        _fb_video_path = _finish_with_audio(str(_fb_video))
+                    _fb_vp = _latest_mp4(media_dir, min_mtime=_fb_start)
+                    if _fb_vp and _fb_vp.stat().st_size > 0:
+                        _fb_video = _finish_with_audio(str(_fb_vp))
                         return {
                             "status": "success",
-                            "video_path": _fb_video_path,
+                            "video_path": _fb_video,
                             "script_path": str(_fb_path),
                             "message": (
-                                f"[FALLBACK VIDEO] The creative animation script had an error, "
-                                f"but a clean text-based solution video was auto-generated.\n"
-                                f"VIDEO SAVED AT: {_fb_video}\n"
-                                f"Script saved at: {_fb_path}\n\n"
-                                f"The student can watch their full solution right now.\n"
-                                f"Optional: fix the original error and retry for the creative version:\n"
-                                f"{error_summary[:400]}"
+                                "[FALLBACK VIDEO] Creative script failed; "
+                                "a 2D visual animation with diagram + steps was produced.\n"
+                                "VIDEO SAVED AT: " + str(_fb_video)
                             ),
-                            "stdout": (_fb_proc.stdout or "")[-1000:],
+                            "stdout": "",
                             "stderr": "",
                         }
                 except Exception:
-                    pass   # fallback itself failed — return the original error below
-            # ─────────────────────────────────────────────────────────────────────
-
+                    pass
+            # ─────────────────────────────────────────────────────────────────
             return {
                 "status": "error",
                 "video_path": None,
                 "script_path": str(script_path),
                 "message": (
                     f"Manim render failed.\n\n"
-                    f"{error_summary}\n\n"
+                    f"{error_summary}"
+                    f"{_3d_hint}\n\n"
                     "INSTRUCTIONS FOR RETRY:\n"
                     "1. Read the ERROR line and the code snippet above carefully.\n"
                     "2. Fix ONLY the broken lines — do not rewrite unrelated parts.\n"
@@ -1115,42 +1220,39 @@ def run_manim_animation(
                 "stderr": stderr[-3000:] if len(stderr) > 3000 else stderr,
             }
 
-        # Render completed with returncode=0 but no video found — try fallback too
-        if solution_text.strip():
-            _fb_code2 = _generate_fallback_code(problem_slug, question, solution_text)
-            _fb_code2 = _sanitize_no_latex(_fb_code2)
-            _fb_path2 = ANIMATIONS_DIR / f"{slug}_{timestamp}_textonly.py"
-            _fb_path2.write_text(_fb_code2, encoding="utf-8")
+        # ── Auto-fallback: 2D visual animation (shapes + steps) ─────────────
+        if question:
             try:
+                _fb_code = _generate_visual_fallback_code(problem_slug, question, solution_text)
+                _fb_path = ANIMATIONS_DIR / (slug + "_" + timestamp + "_visual2d.py")
+                _fb_path.write_text(_fb_code, encoding="utf-8")
+                _fb_start = time.time() - 2
                 subprocess.run(
-                    [
-                        sys.executable, "-m", "manim", "render", "-ql",
-                        "--media_dir", str(media_dir),
-                        str(_fb_path2), "MathAnimationScene",
-                    ],
+                    [sys.executable, "-m", "manim", "render", "-q" + quality,
+                     "--media_dir", str(media_dir),
+                     str(_fb_path), "MathAnimationScene"],
                     capture_output=True, text=True,
-                    timeout=90,
-                    cwd=str(ANIMATIONS_DIR),
-                    env=env,
+                    timeout=manim_cfg.fallback_render_timeout,
+                    cwd=str(ANIMATIONS_DIR), env=env,
                 )
-                _fb_video2 = _latest_mp4(media_dir, min_mtime=render_start_time)
-                if _fb_video2 and _fb_video2.is_file() and _fb_video2.stat().st_size > 0:
-                    _fb_video2_path = _finish_with_audio(str(_fb_video2))
+                _fb_vp = _latest_mp4(media_dir, min_mtime=_fb_start)
+                if _fb_vp and _fb_vp.stat().st_size > 0:
+                    _fb_video = _finish_with_audio(str(_fb_vp))
                     return {
                         "status": "success",
-                        "video_path": _fb_video2_path,
-                        "script_path": str(_fb_path2),
+                        "video_path": _fb_video,
+                        "script_path": str(_fb_path),
                         "message": (
-                            f"[FALLBACK VIDEO] Creative script produced no output — "
-                            f"a text-based solution video was auto-generated.\n"
-                            f"VIDEO SAVED AT: {_fb_video2}\n"
+                            "[FALLBACK VIDEO] Creative script produced no output; "
+                            "a 2D visual animation with diagram + steps was produced.\n"
+                            "VIDEO SAVED AT: " + str(_fb_video)
                         ),
                         "stdout": "",
                         "stderr": "",
                     }
             except Exception:
                 pass
-
+        # ────────────────────────────────────────────────────────────────────
         return {
             "status": "error",
             "video_path": None,
@@ -1162,61 +1264,67 @@ def run_manim_animation(
                 "INSTRUCTIONS FOR RETRY:\n"
                 "1. Inspect stderr for any Manim warnings about the scene not rendering.\n"
                 "2. Ensure the class is named MathAnimationScene and the construct() method is not empty.\n"
-                "3. Always pass solution_text= so the auto-fallback can trigger.\n"
-                "4. Fix the script and call run_manim_animation again."
+                "3. Fix the script and call run_manim_animation again."
             ),
             "stdout": stdout[-2000:] if len(stdout) > 2000 else stdout,
             "stderr": stderr[-1000:] if len(stderr) > 1000 else stderr,
         }
 
     except subprocess.TimeoutExpired:
-        # Render timed out — immediately try guaranteed text-only fallback so the
-        # animation_agent does NOT retry (which would waste another ~150s + 60s LLM).
-        if solution_text.strip():
-            _fb_code_t = _generate_fallback_code(problem_slug, question, solution_text)
-            _fb_code_t = _sanitize_no_latex(_fb_code_t)
-            _fb_path_t = ANIMATIONS_DIR / f"{slug}_{timestamp}_textonly.py"
-            _fb_path_t.write_text(_fb_code_t, encoding="utf-8")
+        _is_3d = "ThreeDScene" in clean_code or "Surface(" in clean_code
+        if _is_3d:
+            _timeout_msg = (
+                f"[3D_TIMEOUT] ThreeDScene render timed out after {_effective_timeout}s. "
+                "Simplify the 3D scene to render faster:\n"
+                "  1. Reduce Surface resolution: u_range steps from 50→20, v_range steps from 50→20\n"
+                "  2. Remove begin_ambient_camera_rotation (adds per-frame work)\n"
+                "  3. Replace complex Surfaces with simpler ParametricSurface with fewer points\n"
+                "  4. Limit self.wait() calls to ≤ 1.0s inside ThreeDScene\n"
+                "Retry with the simplified ThreeDScene code. Only switch to 2D Scene if 3D still fails."
+            )
+        else:
+            _timeout_msg = (
+                f"Animation rendering timed out after {_effective_timeout}s "
+                f"(quality={quality}). Reduce self.wait() durations and simplify animations."
+            )
+        # ── Auto-fallback: 2D visual animation (shapes + steps) ─────────────
+        if question:
             try:
+                _fb_code = _generate_visual_fallback_code(problem_slug, question, solution_text)
+                _fb_path = ANIMATIONS_DIR / (slug + "_" + timestamp + "_visual2d.py")
+                _fb_path.write_text(_fb_code, encoding="utf-8")
+                _fb_start = time.time() - 2
                 subprocess.run(
-                    [
-                        sys.executable, "-m", "manim", "render", "-ql",
-                        "--media_dir", str(media_dir),
-                        str(_fb_path_t), "MathAnimationScene",
-                    ],
+                    [sys.executable, "-m", "manim", "render", "-q" + quality,
+                     "--media_dir", str(media_dir),
+                     str(_fb_path), "MathAnimationScene"],
                     capture_output=True, text=True,
                     timeout=manim_cfg.fallback_render_timeout,
-                    cwd=str(ANIMATIONS_DIR),
-                    env=env,
+                    cwd=str(ANIMATIONS_DIR), env=env,
                 )
-                _fb_video_t = _latest_mp4(media_dir, min_mtime=render_start_time)
-                if _fb_video_t and _fb_video_t.is_file() and _fb_video_t.stat().st_size > 0:
-                    _fb_video_t_path = _finish_with_audio(str(_fb_video_t))
+                _fb_vp = _latest_mp4(media_dir, min_mtime=_fb_start)
+                if _fb_vp and _fb_vp.stat().st_size > 0:
+                    _fb_video = _finish_with_audio(str(_fb_vp))
                     return {
                         "status": "success",
-                        "video_path": _fb_video_t_path,
-                        "script_path": str(_fb_path_t),
+                        "video_path": _fb_video,
+                        "script_path": str(_fb_path),
                         "message": (
-                            f"[FALLBACK VIDEO] Creative render timed out after "
-                            f"{manim_cfg.render_timeout}s ({quality} quality). "
-                            f"A clean text-based solution video was auto-generated.\n"
-                            f"VIDEO SAVED AT: {_fb_video_t}\n"
-                            f"The student can watch the full step-by-step solution now.\n"
-                            f"Do NOT retry — the student already has a complete video."
+                            "[FALLBACK VIDEO] Creative script timed out; "
+                            "a 2D visual animation with diagram + steps was produced.\n"
+                            "VIDEO SAVED AT: " + str(_fb_video)
                         ),
                         "stdout": "",
                         "stderr": "",
                     }
             except Exception:
                 pass
+        # ────────────────────────────────────────────────────────────────────
         return {
             "status": "error",
             "video_path": None,
             "script_path": str(script_path),
-            "message": (
-                f"Animation rendering timed out after {manim_cfg.render_timeout}s "
-                f"(quality={quality}). Set MANIM_QUALITY=l for faster renders."
-            ),
+            "message": _timeout_msg,
             "stdout": "",
             "stderr": "TimeoutExpired",
         }

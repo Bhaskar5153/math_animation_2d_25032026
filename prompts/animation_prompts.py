@@ -11,6 +11,7 @@ from prompts.domains.math_series import SERIES_HELPERS
 from prompts.domains.math_statistics import STATISTICS_HELPERS
 from prompts.domains.math_quadratics import QUADRATICS_HELPERS
 from prompts.domains.math_geometry import GEOMETRY_HELPERS
+from prompts.domains.math_number_theory import NUMBER_THEORY_HELPERS
 from prompts.domains.physics_kinematics import PHYSICS_KINEMATICS_HELPERS
 from prompts.domains.physics_forces import PHYSICS_FORCES_HELPERS
 from prompts.domains.shared_ui import SHARED_UI_HELPERS
@@ -37,6 +38,7 @@ ANIMATION_AGENT_INSTRUCTION = (
     + PHYSICS_KINEMATICS_HELPERS + "\n\n"
     + PHYSICS_FORCES_HELPERS + "\n\n"
     + GEOMETRY_HELPERS + "\n\n"
+    + NUMBER_THEORY_HELPERS + "\n\n"
     + SHARED_UI_HELPERS + "\n\n"
     + CHARACTER_LIBRARY + "\n\n"
     + CHARACTER_SELECTION + "\n\n"

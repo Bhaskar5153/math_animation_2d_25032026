@@ -114,8 +114,9 @@ elif google_cloud.api_key:
 # ── Manim / Rendering ─────────────────────────────────────────────────────────
 manim = SimpleNamespace(
     quality=os.getenv("MANIM_QUALITY") or _get("manim", "quality", "m"),
-    render_timeout=int(_get("manim", "render_timeout", 150)),
-    fallback_render_timeout=int(_get("manim", "fallback_render_timeout", 90)),
+    render_timeout=int(_get("manim", "render_timeout", 120)),
+    render_timeout_3d=int(_get("manim", "render_timeout_3d", 300)),
+    fallback_render_timeout=int(_get("manim", "fallback_render_timeout", 120)),
 )
 
 # ── Audio / TTS ───────────────────────────────────────────────────────────────

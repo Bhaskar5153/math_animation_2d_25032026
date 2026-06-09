@@ -20,6 +20,7 @@ Usage (ADK Web UI):
 """
 import asyncio
 import concurrent.futures
+import logging
 import os
 import random
 import sys
@@ -51,7 +52,36 @@ from pydantic import BaseModel
 # ---------------------------------------------------------------------------
 from google.adk.runners import Runner
 from google.adk.sessions import InMemorySessionService
+from google.adk.sessions.base_session_service import BaseSessionService
 from google.genai.types import Content, Part
+
+# ---------------------------------------------------------------------------
+# Memory event capture — collects mathviz.memory log records per pipeline job
+# ---------------------------------------------------------------------------
+
+class _MemoryLogHandler(logging.Handler):
+    """Captures mathviz.memory records into a per-job list during a pipeline run."""
+    def __init__(self, target: list):
+        super().__init__()
+        self._target = target
+
+    def emit(self, record: logging.LogRecord) -> None:
+        msg = record.getMessage()
+        if isinstance(msg, dict):
+            self._target.append({
+                "event":  msg.get("event", "MEMORY"),
+                "detail": msg.get("detail", ""),
+                "ts":     msg.get("ts", time.time()),
+            })
+        else:
+            self._target.append({"event": "MEMORY", "detail": str(msg), "ts": time.time()})
+
+
+_memory_logger = logging.getLogger("mathviz.memory")
+_memory_logger.setLevel(logging.INFO)
+# Ensure records aren't suppressed by the root logger
+_memory_logger.propagate = False
+
 
 # ---------------------------------------------------------------------------
 # Import the root agent (lazy import to avoid slow startup before env is set)
@@ -62,7 +92,7 @@ def _get_root_agent():
 
 
 # ---------------------------------------------------------------------------
-# ADK session service — Firestore-backed for production persistence.
+# ADK session service — BigQuery-backed for production persistence.
 # Falls back to InMemorySessionService if no GCP project is configured.
 # ---------------------------------------------------------------------------
 APP_NAME = "mathviz"
@@ -70,8 +100,8 @@ APP_NAME = "mathviz"
 def _make_session_service():
     project = google_cloud.project_id
     if project:
-        from tools.firestore_session_service import FirestoreSessionService
-        return FirestoreSessionService(project=project)
+        from tools.bigquery_session_service import BigQuerySessionService
+        return BigQuerySessionService(project=project)
     return InMemorySessionService()
 
 _session_service = _make_session_service()
@@ -127,7 +157,7 @@ async def run_math_question(
     *,
     _model_override: str | None = None,
     _progress_cb=None,
-    _session_svc: InMemorySessionService | None = None,
+    _session_svc: BaseSessionService | None = None,
 ) -> str:
     """
     Run the MathViz agent pipeline for a given question.
@@ -205,7 +235,7 @@ async def run_math_question(
                 )
                 await asyncio.sleep(wait)
                 session_id = str(uuid.uuid4())
-                await _session_service.create_session(
+                await svc.create_session(
                     app_name=APP_NAME, user_id="student", session_id=session_id
                 )
             else:
@@ -279,7 +309,7 @@ def _scan_artifacts(since_time: float) -> tuple[str | None, str | None, bool]:
                 p for p in anim_dir.glob("*.py")
                 if p.stat().st_mtime >= since_time
             ]
-            creative_py = [p for p in new_py if "_textonly" not in p.name]
+            creative_py = [p for p in new_py if "_visual2d" not in p.name and "_textonly" not in p.name]
             is_fallback = bool(new_py) and not creative_py
 
     solution_path: str | None = None
@@ -357,10 +387,15 @@ async def _run_pipeline_job(
     job_id: str,
     question: str,
     session_id: str,
-    session_service: InMemorySessionService,
+    session_service: BaseSessionService,
 ) -> None:
     """Background coroutine: runs the full pipeline and updates _jobs[job_id]."""
     run_start = time.time()
+
+    # Capture memory events from BigQuerySessionService for this job
+    _mem_events: list[dict] = []
+    _mem_handler = _MemoryLogHandler(_mem_events)
+    _memory_logger.addHandler(_mem_handler)
 
     def _on_agent(author: str) -> None:
         """Update job stage when the ADK runner switches agents."""
@@ -392,6 +427,15 @@ async def _run_pipeline_job(
                 render_quality=manim_cfg.quality,
                 status="success",
             ))
+        elif not video_path:
+            from tools.bigquery_tracker import log_failure
+            asyncio.get_event_loop().run_in_executor(None, lambda: log_failure(
+                session_id=session_id,
+                question=question,
+                failure_stage="animation_render",
+                error_type="no_video",
+                error_message=(response_text or "No video produced")[:1000],
+            ))
 
         _jobs[job_id] = {
             "status": "done",
@@ -403,6 +447,7 @@ async def _run_pipeline_job(
             "video_filename": Path(video_path).name if video_path else None,
             "solution_filename": Path(solution_path).name if solution_path else None,
             "elapsed": round(time.time() - run_start),
+            "memory_log": list(_mem_events),
         }
 
     except ServerError503 as exc:
@@ -417,6 +462,7 @@ async def _run_pipeline_job(
                 "Please wait a few minutes and try again."
             ),
             "elapsed": round(time.time() - run_start),
+            "memory_log": list(_mem_events),
         }
         print(f"[MathViz] Job {job_id} failed (503): {exc}")
 
@@ -437,8 +483,21 @@ async def _run_pipeline_job(
             "session_id": session_id,
             "response": str(actual_exc),
             "elapsed": round(time.time() - run_start),
+            "memory_log": list(_mem_events),
         }
         print(f"[MathViz] Job {job_id} failed: {actual_exc}")
+        from tools.bigquery_tracker import log_failure
+        asyncio.get_event_loop().run_in_executor(None, lambda: log_failure(
+            session_id=session_id,
+            question=question,
+            failure_stage="pipeline_exception",
+            error_type=type(actual_exc).__name__,
+            error_message=str(actual_exc)[:1000],
+        ))
+
+    finally:
+        # Always remove the per-job memory log handler
+        _memory_logger.removeHandler(_mem_handler)
 
 
 # ---------------------------------------------------------------------------

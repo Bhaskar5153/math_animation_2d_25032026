@@ -208,8 +208,7 @@ __marimo__/
 
 # MathViz outputs (generated files — large media)
 outputs/solutions/*.md
-outputs/animations/*.py
-outputs/animations/media/
+outputs/animations/*
 
 # Keep folder structure in git
 !outputs/solutions/.gitkeep

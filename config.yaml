@@ -16,7 +16,7 @@
 models:
   primary:   "gemini-2.5-pro"     # Orchestrator, math solver (needs reasoning depth)
   fast:      "gemini-2.5-flash"   # Story writer, solution writer (speed > depth)
-  animation: "gemini-2.5-pro"     # Animation code gen (Pro reduces render failures)
+  animation: "gemini-2.5-flash"   # Animation code gen (flash is fast enough; Pro is 10x slower)
   fallback:  "gemini-2.0-flash"   # Used when primary is overloaded / rate-limited
 
 # ── Google Cloud / Vertex AI ──────────────────────────────────────────────────
@@ -44,11 +44,15 @@ manim:
   #   k = 2160p 60fps (~10min render) ← 4K, not recommended for classroom
   quality: "m"
 
-  # Seconds before a stuck creative render is killed (quality m renders in ~90s)
-  render_timeout: 150
+  # Seconds before a stuck creative render is killed (quality m renders ~5x animation duration)
+  # A 40s animation = ~200-250s render. 270s gives safe margin for complex geometry scenes.
+  render_timeout: 270
 
-  # Seconds for the guaranteed text-only fallback render (always low quality)
-  fallback_render_timeout: 90
+  # Seconds allowed for ThreeDScene renders (opengl + surface rendering is slow)
+  render_timeout_3d: 300
+
+  # Seconds for the guaranteed visual-fallback render (simple 2D shapes + steps)
+  fallback_render_timeout: 120
 
 # ── Audio Narration (edge-tts) ────────────────────────────────────────────────
 audio:
@@ -62,9 +66,10 @@ audio:
   #   en-AU-NatashaNeural   ← Australian female
   voice: "en-US-AriaNeural"
 
-  # Maximum characters of narration script sent to TTS
-  # (animation stories are usually 800-1500 chars; solution text can be longer)
-  max_chars: 3000
+  # Maximum characters of narration script sent to TTS.
+  # At ~130 words/min, 350 chars ≈ ~20-25s of speech — fits inside a 30-35s animation.
+  # Keeping audio shorter than video ensures the final-answer narration is never cut off.
+  max_chars: 350
 
   # Seconds to wait for edge-tts to generate the MP3
   generation_timeout: 60

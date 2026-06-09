@@ -41,7 +41,16 @@ self.play(Create(curve), run_time=2.5)
 # Curve label in upper-left of graph area
 curve_lbl = Text("f(x) = x^3 sin(x)", font_size=22, color=BLUE_C)
 curve_lbl.to_corner(UL).shift(RIGHT*0.3 + DOWN*1.0)
-self.play(Write(curve_lbl))
+
+# Problem statement at BOTTOM of screen -- grouped so it can be FadeOut in one call
+prob_lbl = Text("y = x^3 sin(x)", font_size=32, color=WHITE)
+find_lbl = Text("Find: dy/dx", font_size=28, color=YELLOW)
+problem_group = VGroup(prob_lbl, find_lbl).arrange(DOWN, buff=0.25)
+problem_group.move_to(DOWN*3.2)          # y ≈ -3.2, clear of graph and equations
+self.play(Write(curve_lbl), Write(problem_group))
+
+# Scene 2: FadeOut problem labels first, then sweep tangent, then show equations
+self.play(FadeOut(problem_group))
 
 # Moving dot + tangent line sweep via ValueTracker
 t_track = ValueTracker(x_lo)
