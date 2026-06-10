@@ -16,7 +16,7 @@
 models:
   primary:   "gemini-2.5-pro"     # Orchestrator, math solver (needs reasoning depth)
   fast:      "gemini-2.5-flash"   # Story writer, solution writer (speed > depth)
-  animation: "gemini-2.5-flash"   # Animation code gen (flash is fast enough; Pro is 10x slower)
+  animation: "gemini-2.5-pro"     # Animation code gen (Pro required: flash skips tool calls)
   fallback:  "gemini-2.0-flash"   # Used when primary is overloaded / rate-limited
 
 # ── Google Cloud / Vertex AI ──────────────────────────────────────────────────

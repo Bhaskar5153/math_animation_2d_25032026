@@ -1101,5 +1101,151 @@ class MathAnimationScene(Scene):
             Flash(s5.get_center(), color=GOLD, flash_radius=1.5, num_lines=12),
         )
         self.wait(2.0)
+```
+
+### GEOMETRY TYPE 12: HOLLOW HEMISPHERE → CYLINDER (volume conservation)
+# TRIGGER: "hollow hemispherical shell", "internal/external diameter", "hollow hemisphere melted",
+#          "recast into solid cylinder", "find height of cylinder", "melted and recast"
+# VISUAL:  Act 1 — isometric hollow hemisphere on LEFT (outer arc + inner arc), formulas on RIGHT.
+#          Act 2 — cylinder outline on LEFT (after FadeOut), solve V_shell = V_cyl on RIGHT.
+#          NEVER use ThreeDScene — 2D arcs render correctly and faster.
+# NOTE:    Adapt R, r, r_cyl, h_answer from the ACTUAL problem values.
+
+```python
+import numpy as np
+import math as _math
+from manim import *
+
+# ---- Adapt these values from the ACTUAL problem ----
+R_outer  = 5      # external radius of hemisphere (cm)
+r_inner  = 3      # internal radius of hemisphere (cm)
+r_cyl    = 7      # radius of cylinder (cm)
+h_answer = "4/3"  # height answer as string (cm)
+# Intermediate values:
+R3_val   = R_outer**3              # = 125
+r3_val   = r_inner**3              # = 27
+diff3    = R3_val - r3_val         # = 98
+v_num    = 2 * diff3               # = 196 (numerator of (2/3)*diff3 with 3 in denom)
+# ---- End of adapted values ----
+
+SCALE = 0.42   # visual scale for arcs
+
+class MathAnimationScene(Scene):
+    def construct(self):
+        bg = Rectangle(width=16, height=9, fill_color="#0d0d0d", fill_opacity=1)
+        self.add(bg)
+
+        title = Text("Hollow Hemisphere → Cylinder", font_size=30, color=YELLOW)
+        title.to_edge(UP, buff=0.25)
+        self.play(Write(title), run_time=0.6)
+        self.wait(0.4)
+
+        # ── ACT 1: HOLLOW HEMISPHERE ────────────────────────────────────────
+        cx = LEFT * 3.0 + DOWN * 0.3
+
+        # Arcs open downward: start_angle=0 (right), sweep PI to left = top dome
+        outer_arc = Arc(radius=R_outer * SCALE, start_angle=0, angle=PI,
+                        stroke_color=ORANGE, stroke_width=4)
+        outer_arc.move_to(cx)
+        outer_base = Line(
+            cx + LEFT  * (R_outer * SCALE),
+            cx + RIGHT * (R_outer * SCALE),
+            stroke_color=ORANGE, stroke_width=4
+        )
+
+        inner_arc = Arc(radius=r_inner * SCALE, start_angle=0, angle=PI,
+                        stroke_color=ORANGE, stroke_width=3)
+        inner_arc.move_to(cx)
+        inner_base = Line(
+            cx + LEFT  * (r_inner * SCALE),
+            cx + RIGHT * (r_inner * SCALE),
+            stroke_color=ORANGE, stroke_width=3
+        )
+
+        R_lbl = Text("R = 5 cm", font_size=22, color=ORANGE)
+        R_lbl.next_to(cx + RIGHT * (R_outer * SCALE), RIGHT, buff=0.12)
+        r_lbl = Text("r = 3 cm", font_size=22, color=ORANGE)
+        r_lbl.move_to(cx + UP * (r_inner * SCALE * 0.6) + LEFT * 0.5)
+        hem_tag = Text("Hollow Shell (clay)", font_size=20, color=ORANGE)
+        hem_tag.move_to(cx + DOWN * 1.5)
+
+        self.play(Create(outer_arc), Create(outer_base), run_time=0.8)
+        self.play(Create(inner_arc), Create(inner_base), run_time=0.6)
+        self.play(Write(R_lbl), Write(r_lbl), Write(hem_tag), run_time=0.7)
+        self.wait(0.6)
+
+        # Right: volume formula steps
+        e1 = Text("Volume of hollow shell:", font_size=25, color=WHITE)
+        e2 = Text("V = (2/3)π(R³ − r³)",    font_size=26, color=WHITE)
+        e3 = Text("  = (2/3)π(5³ − 3³)",    font_size=25, color=YELLOW)
+        e4 = Text("  = (2/3)π(125 − 27)",   font_size=25, color=YELLOW)
+        e5 = Text("  = (196/3)π  cm³",       font_size=27, color=GOLD, weight="BOLD")
+        rhs1 = VGroup(e1, e2, e3, e4, e5).arrange(DOWN, buff=0.28, aligned_edge=LEFT)
+        rhs1.move_to(RIGHT * 2.5 + UP * 0.7)
+
+        for s in rhs1:
+            self.play(Write(s), run_time=0.55)
+            self.wait(0.7)
+        self.play(Circumscribe(e5, color=GOLD, buff=0.10))
+        self.wait(0.6)
+
+        # ── TRANSITION ──────────────────────────────────────────────────────
+        trans = Text("Shell melted → solid cylinder →", font_size=21, color=WHITE)
+        trans.move_to(cx + UP * 2.5)
+        self.play(Write(trans), run_time=0.5)
+        self.wait(0.4)
+        self.play(FadeOut(VGroup(outer_arc, outer_base, inner_arc, inner_base,
+                                  R_lbl, r_lbl, hem_tag, trans)))
+        self.play(FadeOut(rhs1))
+
+        # ── ACT 2: CYLINDER ─────────────────────────────────────────────────
+        cyl_w = 2 * r_cyl * SCALE * 1.0
+        cyl_h = 0.9   # visual height (not proportional)
+        cyl_rect = Rectangle(width=cyl_w, height=cyl_h,
+                              stroke_color=TEAL_A, stroke_width=4,
+                              fill_color=TEAL_E, fill_opacity=0.20)
+        cyl_rect.move_to(cx)
+        cyl_top_ell = Ellipse(width=cyl_w, height=0.30,
+                              stroke_color=TEAL_A, stroke_width=3,
+                              fill_color=TEAL_A, fill_opacity=0.12)
+        cyl_top_ell.move_to(cx + UP * (cyl_h / 2))
+
+        rc_lbl = Text("r_cyl = 7 cm", font_size=22, color=TEAL_A)
+        rc_lbl.next_to(cyl_rect.get_bottom(), DOWN, buff=0.18)
+        h_unk = Text("h = ?", font_size=24, color=YELLOW)
+        h_unk.next_to(cyl_rect, RIGHT, buff=0.20)
+        cyl_tag = Text("Solid Cylinder", font_size=20, color=TEAL_A)
+        cyl_tag.move_to(cx + DOWN * 1.5)
+
+        self.play(Create(cyl_rect), FadeIn(cyl_top_ell), run_time=0.8)
+        self.play(Write(rc_lbl), Write(h_unk), Write(cyl_tag), run_time=0.7)
+        self.wait(0.6)
+
+        # Right: equate and solve
+        s1 = Text("Volume of cylinder:",               font_size=25, color=WHITE)
+        s2 = Text("V_cyl = π × 7² × h",               font_size=26, color=WHITE)
+        s3 = Text("      = 49πh",                      font_size=26, color=YELLOW)
+        s4 = Text("Volume conserved  →  V_shell = V_cyl", font_size=23, color=WHITE)
+        s5 = Text("(196/3)π = 49πh",                  font_size=26, color=YELLOW)
+        s6 = Text("h = 196 / (3 × 49)",               font_size=26, color=YELLOW)
+        s7 = Text("h = 4/3 cm",                        font_size=32, color=GOLD, weight="BOLD")
+        rhs2 = VGroup(s1, s2, s3, s4, s5, s6, s7).arrange(DOWN, buff=0.24, aligned_edge=LEFT)
+        rhs2.move_to(RIGHT * 2.5 + UP * 0.4)
+
+        for s in rhs2:
+            self.play(Write(s), run_time=0.50)
+            self.wait(0.65)
+
+        # Answer celebration
+        ans_box = SurroundingRectangle(s7, color=GOLD, buff=0.15, corner_radius=0.10)
+        self.play(Create(ans_box))
+        h_final = Text("h = 4/3 cm", font_size=24, color=GOLD, weight="BOLD")
+        h_final.next_to(cyl_rect, RIGHT, buff=0.20)
+        self.play(Transform(h_unk, h_final))
+        self.play(
+            Circumscribe(s7, color=GOLD, buff=0.12),
+            Flash(s7.get_center(), color=GOLD, flash_radius=1.5, num_lines=12),
+        )
+        self.wait(2.0)
 ```\
 """

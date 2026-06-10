@@ -82,6 +82,7 @@ ANIMATION_AGENT_FULL_INSTRUCTION = (
      FORBIDDEN from ThreeDScene (use isometric 2D Scene instead):
        - Volume / surface area of cone, sphere, cylinder, cube (→ GEOMETRY TYPE 7)
        - Volume conservation: "cone reshaped into sphere", "melted/recast" (→ GEOMETRY TYPE 11)
+       - Hollow hemisphere → cylinder: "hollow hemispherical shell", "internal/external diameter" (→ GEOMETRY TYPE 12)
        - BPT / similar triangles (→ GEOMETRY TYPE 10)
        - Any problem where shapes can be drawn as 2D isometric solids
      Use 2D Scene for: single-variable equations, proofs/identities, polynomials,
@@ -322,6 +323,14 @@ ANIMATION_AGENT_FULL_INSTRUCTION = (
   - [ ] RIGHT: V1 formula → substitute → V1=V2 → solve for R step by step.
   - [ ] Adapt r_cone, h_cone, vol_num, r3_val, r_sphere from the ACTUAL problem values.
   - [ ] Final answer: SurroundingRectangle(GOLD) + Circumscribe + Flash.
+- [ ] **HOLLOW HEMISPHERE → CYLINDER** checklist (if problem says "hollow hemispherical shell", "internal/external diameter", "melted and recast into cylinder", "find height of cylinder"):
+  - [ ] NEVER use ThreeDScene. Use regular Scene with 2D Arc shapes.
+  - [ ] Use GEOMETRY TYPE 12 code helper as the starting template.
+  - [ ] Act 1 (LEFT): outer Arc + inner Arc (showing hollow), with R and r labels. Formulas on RIGHT.
+  - [ ] Act 2 (LEFT after FadeOut): Rectangle cylinder with "h=?" label. V_shell=V_cyl solve on RIGHT.
+  - [ ] Formula: V_shell = (2/3)π(R³ − r³). NEVER use Line(*[many_points]) — use Arc directly.
+  - [ ] Adapt R_outer, r_inner, r_cyl, h_answer, v_num from the ACTUAL problem values.
+  - [ ] Final answer: SurroundingRectangle(GOLD) + Circumscribe + Flash.
 - [ ] **BPT / SIMILAR TRIANGLES** checklist (if problem says "DE || BC", "LM || AB", "PQ || XY" in a triangle):
   - [ ] NEVER produce text-only. NEVER use generic textbook values (3/5, 5.6, 2.1). Use EXACT expressions from the problem.
   - [ ] LEFT HALF (MANDATORY): Large triangle (Polygon A,B,C) in BLUE_C/BLUE_E. Parallel line (DE/LM/PQ) drawn in YELLOW.
@@ -360,7 +369,7 @@ ANIMATION_AGENT_FULL_INSTRUCTION = (
 - [ ] `FadeOut(Group(*self.mobjects))` between acts -- **never** `VGroup(*self.mobjects)`
 - [ ] At least 2 amusing moments (panic wiggle, wrong-answer crash, happy jump) -- for word problems only; skip for pure concept animations
 - [ ] Confetti + Flash + gold SurroundingRectangle at the final answer reveal
-- [ ] Total estimated animation time is 60-120 seconds
+- [ ] Total estimated animation time is ≤ 35 seconds (see ANIMATION LENGTH + AUDIO SYNC rule above)
 - [ ] Ends with the FINAL ANSWER in gradient color matching the domain, clearly displayed and boxed in gold
 
 ## Retry Logic -- MANDATORY on error

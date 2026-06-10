@@ -403,6 +403,11 @@ def _sanitize_no_latex(code: str) -> str:
     #     The rate_func / run_time should be passed directly to self.play().
     code = re.sub(r"\.set_anim_args\s*\([^)]*\)", "", code)
 
+    # 19b. Fix .darker() / .lighter() — LLMs invent these; Manim CE uses .darken()/.lighten()
+    #      Replace with the correct Manim ManimColor methods.
+    code = re.sub(r"\.darker\s*\(", ".darken(", code)
+    code = re.sub(r"\.lighter\s*\(", ".lighten(", code)
+
     # 20. Fix numpy-array direction constants used as boolean (causes ValueError).
     #     e.g.  if side == UL:  →  if True:  (since LLMs pass UL/DR as string args now,
     #     this most commonly happens in user-defined make_bubble helper code).
@@ -1168,6 +1173,7 @@ def run_manim_animation(
             if question:
                 try:
                     _fb_code = _generate_visual_fallback_code(problem_slug, question, solution_text)
+                    _fb_code = _sanitize_no_latex(_fb_code)  # fixes CYAN→TEAL_A and other invalid names
                     _fb_path = ANIMATIONS_DIR / (slug + "_" + timestamp + "_visual2d.py")
                     _fb_path.write_text(_fb_code, encoding="utf-8")
                     _fb_start = time.time() - 2
@@ -1224,6 +1230,7 @@ def run_manim_animation(
         if question:
             try:
                 _fb_code = _generate_visual_fallback_code(problem_slug, question, solution_text)
+                _fb_code = _sanitize_no_latex(_fb_code)  # fixes CYAN→TEAL_A and other invalid names
                 _fb_path = ANIMATIONS_DIR / (slug + "_" + timestamp + "_visual2d.py")
                 _fb_path.write_text(_fb_code, encoding="utf-8")
                 _fb_start = time.time() - 2
@@ -1291,6 +1298,7 @@ def run_manim_animation(
         if question:
             try:
                 _fb_code = _generate_visual_fallback_code(problem_slug, question, solution_text)
+                _fb_code = _sanitize_no_latex(_fb_code)  # fixes CYAN→TEAL_A and other invalid names
                 _fb_path = ANIMATIONS_DIR / (slug + "_" + timestamp + "_visual2d.py")
                 _fb_path.write_text(_fb_code, encoding="utf-8")
                 _fb_start = time.time() - 2

@@ -113,6 +113,14 @@ Match the problem to its visual (LEFT=Axes, RIGHT=algebra steps):
   !! CRITICAL: NEVER use ThreeDScene for volume conservation — isometric 2D only.
   !! Use GEOMETRY TYPE 11 code helper. Adapt r_cone, h_cone, r_sphere from actual values.
 
+  HOLLOW HEMI-   → Act 1 (LEFT): outer Arc + inner Arc showing hollow shell; RIGHT: V_shell formula.
+  SPHERE →         Act 2 (LEFT after FadeOut): Rectangle cylinder + "h=?"; RIGHT: V_shell=V_cyl → solve h.
+  CYLINDER       Formula: V_shell = (2/3)π(R³ − r³)
+  (TRIGGER: "hollow hemispherical shell", "internal/external diameter", "melted and recast
+   into cylinder", "find height of cylinder", "diameter of internal and external surfaces")
+  !! CRITICAL: NEVER use Line(*[many_points]) — use Arc(radius, start_angle, angle) directly.
+  !! Use GEOMETRY TYPE 12 code helper. Adapt R_outer, r_inner, r_cyl, h_answer from actual values.
+
   DIOPHANTINE /    → 2D Axes on LEFT: integer grid dots + TEAL discriminant boundary curve;
   INTEGER EQNS       GOLD Dot at the only solution (usually origin); RIGHT = case-by-case
   (TRIGGER: "solve in integers", "find integer solutions", "prove only x=y=z=0 satisfies",
