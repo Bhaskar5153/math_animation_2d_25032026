@@ -1,0 +1,15 @@
+fastapi>=0.135.2
+google>=3.0.0
+google-adk>=1.27.4
+google-genai>=1.68.0
+edge-tts>=6.1.9
+imageio-ffmpeg>=0.6.0
+manim>=0.20.1
+pandas>=3.0.1
+python-dotenv>=1.2.2
+google-cloud-bigquery>=3.0.0
+google-cloud-firestore>=2.16.0
+pyyaml>=6.0
+python-multipart>=0.0.22
+streamlit>=1.40.0
+uvicorn>=0.42.0

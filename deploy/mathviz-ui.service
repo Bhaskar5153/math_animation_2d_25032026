@@ -1,0 +1,19 @@
+[Unit]
+Description=MathViz Streamlit UI
+After=mathviz-api.service
+
+[Service]
+User=mathviz
+WorkingDirectory=/opt/mathviz
+EnvironmentFile=/opt/mathviz/.env
+ExecStart=/opt/mathviz/venv/bin/streamlit run streamlit_app.py \
+  --server.port 8501 \
+  --server.address 0.0.0.0 \
+  --server.headless true
+Restart=always
+RestartSec=5
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target

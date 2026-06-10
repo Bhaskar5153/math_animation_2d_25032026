@@ -7,12 +7,13 @@ Run with:
 Requires the FastAPI backend running on port 8000:
     uv run uvicorn main:app --port 8000
 """
+import os
 import re
 import time
 import requests
 import streamlit as st
 
-API_BASE      = "http://localhost:8000"
+API_BASE      = os.environ.get("MATHVIZ_API_BASE", "http://localhost:8000")
 POLL_INTERVAL = 2     # seconds between in-place status polls
 TIMEOUT_SHORT = 15    # seconds for /solve and /status calls
 TIMEOUT_FILE  = 60    # seconds for video/solution downloads
